@@ -1,0 +1,12 @@
+Debug/
+x64/
+*.opensdf
+*.sdf
+*.suo
+*.vcxproj.user
+*.VC.db
+*.VC.opendb
+cbuild/
+.vs/*
+__pycache__
+!lib/*.lib
