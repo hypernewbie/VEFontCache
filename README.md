@@ -1,6 +1,6 @@
 ![Logo](images/logo.png)
 
-VEFontCache is a single header-only library designed for game engines.
+VE Font Cache is a single header-only GPU font rendering library designed for game engines.
 
 It aims to:
  * Be fast and simple to integrate.
@@ -101,3 +101,12 @@ on how to implement your own backend to plumb this directly into your engine!
 ![Screenshot 3](images/raincode.png)
 
 ![Screenshot 4](images/ve_fontcache_pressure_test.gif)
+
+# Similar projects and links
+
+Here are links to some awesome similar and related projects:
+* fontstash - https://github.com/memononen/fontstash
+* stb_truetype ( has font rasterisation itself ) - https://github.com/nothings/stb/blob/master/stb_truetype.h
+* slug - http://sluglibrary.com/
+* pathfinder - https://github.com/pcwalton/pathfinder
+* https://medium.com/@evanwallace/easy-scalable-text-rendering-on-the-gpu-c3f4d782c5ac
