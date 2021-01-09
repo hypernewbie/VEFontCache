@@ -1080,6 +1080,10 @@ void ve_fontcache_shape_text_uncached( ve_fontcache* cache, ve_font_id font, ve_
 			prev_codepoint = 0;
 			continue;
 		}
+		if ( std::abs( entry.size ) <= 12 ) {
+			// Expand advance to closest pixel for font small sizes.
+			pos = std::ceilf( pos );
+		}
 
 		output.codepoints.push_back( ( ve_codepoint ) codepoint );
 		stbtt_GetCodepointHMetrics( &entry.info, codepoint, &advance, &to_left_side_glyph );
@@ -1087,7 +1091,7 @@ void ve_fontcache_shape_text_uncached( ve_fontcache* cache, ve_font_id font, ve_
 		
 		float adv = advance * entry.size_scale;
 
-		pos += adv;
+		pos += adv + 0.5f;
 		prev_codepoint = codepoint;
 	}
 #endif // VE_FONTCACHE_HARFBUZZ

@@ -272,6 +272,7 @@ ve_font_id logo_font;
 ve_font_id title_font;
 ve_font_id print_font;
 ve_font_id mono_font;
+ve_font_id small_font;
 
 ve_font_id demo_sans_font;
 ve_font_id demo_serif_font;
@@ -343,12 +344,13 @@ void init_demo()
 	ve_fontcache_init( &cache );
 	ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
 	static std::vector< uint8_t > buffer, buffer2, buffer3, buffer4, buffer5, buffer6,
-		buffer7, buffer8, buffer9, buffer10, buffer11, buffer12, buffer13;
+		buffer7, buffer8, buffer9, buffer10, buffer11, buffer12, buffer13, buffer14;
 
 	logo_font = ve_fontcache_loadfile( &cache, "fonts/SawarabiMincho-Regular.ttf", buffer, 330.0f );
 	title_font = ve_fontcache_loadfile( &cache, "fonts/OpenSans-Regular.ttf", buffer2, 42.0f );
 	print_font = ve_fontcache_loadfile( &cache, "fonts/NotoSansJP-Light.otf", buffer3, 19.0f );
 	mono_font = ve_fontcache_loadfile( &cache, "fonts/UbuntuMono-Regular.ttf", buffer4, 21.0f );
+	small_font = ve_fontcache_loadfile( &cache, "fonts/Roboto-Regular.ttf", buffer14, 10.0f );
 
 	demo_sans_font = ve_fontcache_loadfile( &cache, "fonts/OpenSans-Regular.ttf", buffer2, 18.0f );
 	demo_serif_font = ve_fontcache_loadfile( &cache, "fonts/Bitter-Regular.ttf", buffer5, 18.0f );
@@ -459,24 +461,26 @@ void render_demo( TinyWindow::tWindow* window, float dT )
 		ve_fontcache_draw_text( &cache, demo_script_font, font_family_test, 0.3f, current_scroll - ( section_start + 0.44f ), 1.0f / window_size.width,  1.0f / window_size.height );
 		ve_fontcache_draw_text( &cache, print_font, u8"Monospace", 0.2f, current_scroll - ( section_start + 0.52f ), 1.0f / window_size.width,  1.0f / window_size.height );
 		ve_fontcache_draw_text( &cache, demo_mono_font, font_family_test, 0.3f, current_scroll - ( section_start + 0.52f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, print_font, u8"Small", 0.2f, current_scroll - ( section_start + 0.60f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, small_font, font_family_test, 0.3f, current_scroll - ( section_start + 0.60f ), 1.0f / window_size.width,  1.0f / window_size.height );
 
-		ve_fontcache_draw_text( &cache, print_font, u8"Greek", 0.2f, current_scroll - ( section_start + 0.62f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, demo_sans_font, u8"Ήταν απλώς θέμα χρόνου.", 0.3f, current_scroll - ( section_start + 0.62f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, print_font, u8"Vietnamnese", 0.2f, current_scroll - ( section_start + 0.66f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, demo_sans_font, u8"Bầu trời trong xanh thăm thẳm, không một gợn mây.", 0.3f, current_scroll - ( section_start + 0.66f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, print_font, u8"Thai", 0.2f, current_scroll - ( section_start + 0.70f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, demo_thai_font, u8"การเดินทางขากลับคงจะเหงา", 0.3f, current_scroll - ( section_start + 0.70f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, print_font, u8"Chinese", 0.2f, current_scroll - ( section_start + 0.74f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, demo_chinese_font, u8"床前明月光 疑是地上霜 举头望明月 低头思故乡", 0.3f, current_scroll - ( section_start + 0.74f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, print_font, u8"Japanese", 0.2f, current_scroll - ( section_start + 0.78f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, demo_japanese_font, u8"ぎょしょうとナレズシの研究 モンスーン・アジアの食事文化", 0.3f, current_scroll - ( section_start + 0.78f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, print_font, u8"Korean", 0.2f, current_scroll - ( section_start + 0.82f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, demo_korean_font, u8"그들의 장비와 기구는 모두 살아 있다.", 0.3f, current_scroll - ( section_start + 0.82f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, print_font, u8"Arabic", 0.2f, current_scroll - ( section_start + 0.86f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, demo_arabic_font, u8"الحب سماء لا تمطر غير الأحلام. (Sorry broken, coming Soon!)", 0.3f, current_scroll - ( section_start + 0.86f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, print_font, u8"Greek", 0.2f, current_scroll - ( section_start + 0.72f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, demo_sans_font, u8"Ήταν απλώς θέμα χρόνου.", 0.3f, current_scroll - ( section_start + 0.72f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, print_font, u8"Vietnamnese", 0.2f, current_scroll - ( section_start + 0.76f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, demo_sans_font, u8"Bầu trời trong xanh thăm thẳm, không một gợn mây.", 0.3f, current_scroll - ( section_start + 0.76f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, print_font, u8"Thai", 0.2f, current_scroll - ( section_start + 0.80f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, demo_thai_font, u8"การเดินทางขากลับคงจะเหงา", 0.3f, current_scroll - ( section_start + 0.80f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, print_font, u8"Chinese", 0.2f, current_scroll - ( section_start + 0.84f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, demo_chinese_font, u8"床前明月光 疑是地上霜 举头望明月 低头思故乡", 0.3f, current_scroll - ( section_start + 0.84f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, print_font, u8"Japanese", 0.2f, current_scroll - ( section_start + 0.88f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, demo_japanese_font, u8"ぎょしょうとナレズシの研究 モンスーン・アジアの食事文化", 0.3f, current_scroll - ( section_start + 0.88f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, print_font, u8"Korean", 0.2f, current_scroll - ( section_start + 0.92f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, demo_korean_font, u8"그들의 장비와 기구는 모두 살아 있다.", 0.3f, current_scroll - ( section_start + 0.92f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, print_font, u8"Arabic", 0.2f, current_scroll - ( section_start + 0.96f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, demo_arabic_font, u8"الحب سماء لا تمطر غير الأحلام. (Sorry broken, coming Soon!)", 0.3f, current_scroll - ( section_start + 0.96f ), 1.0f / window_size.width,  1.0f / window_size.height );
 	}
 
-	section_start = 2.0f; section_end = section_start + 2.13f;
+	section_start = 2.1f; section_end = section_start + 2.23f;
 	if ( current_scroll > section_start && current_scroll < section_end )
 	{
 		const int GRID_W = 80, GRID_H = 50, NUM_RAINDROPS = GRID_W / 3;
@@ -543,7 +547,7 @@ void render_demo( TinyWindow::tWindow* window, float dT )
 		ve_fontcache_set_colour( &cache, code_colour );
 	}
 
-	section_start = 3.2f; section_end = 4.6;
+	section_start = 3.3f; section_end = 4.7;
 	if ( current_scroll > section_start && current_scroll < section_end )
 	{
 		const int GRID_W = 30, GRID_H = 15, GRID2_W = 8, GRID2_H = 2, GRID3_W = 16, GRID3_H = 4;
@@ -620,7 +624,7 @@ void render_demo( TinyWindow::tWindow* window, float dT )
 	}
 
 	// Smooth scrolling!
-	printf("%f\n", current_scroll);
+	// printf("%f\n", current_scroll);
 	static float mouse_down_pos = -1.0f, mouse_down_scroll = -1.0f, mouse_prev_pos, scroll_velocity = 0.0f;
 	if ( window->mouseButton[ ( int ) TinyWindow::mouseButton_t::left ] == TinyWindow::buttonState_t::down ) {
 		if ( mouse_down_pos < 0.0f ) {
