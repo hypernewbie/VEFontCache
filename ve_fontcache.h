@@ -1091,7 +1091,7 @@ void ve_fontcache_shape_text_uncached( ve_fontcache* cache, ve_font_id font, ve_
 		
 		float adv = advance * entry.size_scale;
 
-		pos += adv + 0.5f;
+		pos += adv;
 		prev_codepoint = codepoint;
 	}
 #endif // VE_FONTCACHE_HARFBUZZ
