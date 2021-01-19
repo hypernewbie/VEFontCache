@@ -511,7 +511,7 @@ namespace TinyWindow
 
         unsigned short ID; //how to make this a more dynamic ID system for hot-plugging?
 
-        //we need face buttons
+        //we need hb_face buttons
         //we need triggers
         //we need the axis buttons as well
 
