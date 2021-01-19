@@ -36,6 +36,11 @@
 #include <gl/glu.h>
 #include "TinyWindow.h"
 
+#ifdef DEMO_HARFBUZZ
+	#define VE_FONTCACHE_HARFBUZZ
+	#include <hb/hb.h>
+#endif // DEMO_HARFBUZZ
+
 #define VE_FONTCACHE_IMPL
 //#define VE_FONTCACHE_DEBUGPRINT
 #include "../ve_fontcache.h"
@@ -284,7 +289,7 @@ ve_font_id demo_japanese_font;
 ve_font_id demo_korean_font;
 ve_font_id demo_thai_font;
 ve_font_id demo_arabic_font;
-ve_font_id demo_hieroglyph_font;
+ve_font_id demo_hebrew_font;
 
 ve_font_id demo_raincode_font;
 ve_font_id demo_grid2_font;
@@ -362,7 +367,7 @@ void init_demo()
 	demo_korean_font = ve_fontcache_loadfile( &cache, "fonts/NanumPenScript-Regular.ttf", buffer9, 36.0f );
 	demo_thai_font = ve_fontcache_loadfile( &cache, "fonts/Krub-Regular.ttf", buffer10, 24.0f );
 	demo_arabic_font = ve_fontcache_loadfile( &cache, "fonts/Tajawal-Regular.ttf", buffer11, 24.0f );
-	demo_hieroglyph_font = ve_fontcache_loadfile( &cache, "fonts/NovaMono-Regular.ttf", buffer12, 22.0f );
+	demo_hebrew_font = ve_fontcache_loadfile( &cache, "fonts/DavidLibre-Regular.ttf", buffer12, 22.0f );
 
 	demo_raincode_font = ve_fontcache_loadfile( &cache, "fonts/NotoSansJP-Regular.otf", buffer13, 20.0f );
 	demo_grid2_font = ve_fontcache_loadfile( &cache, "fonts/NotoSerifSC-Regular.otf", buffer8, 54.0f );
@@ -383,7 +388,7 @@ void render_demo( TinyWindow::tWindow* window, float dT )
 			u8"           •    Be backend agnostic and easy to port to any API such as Vulkan, DirectX, OpenGL.\n"
 			u8"           •    Load TTF & OTF file formats directly.\n"
 			u8"           •    Use only runtime cache with no offline calculation.\n"
-			u8"           •    Render glyphs at reasonable quality at a wide range of font sizes.\n"
+			u8"           •    Render glyphs at reasonable quality at a wide range of hb_font sizes.\n"
 			u8"           •    Support a good amount of internationalisation. そうですね!\n"
 			u8"           •    Support cached text shaping with HarfBuzz with simple Latin-style fallback.\n"
 			u8"           •    Load and unload fonts at any time.\n"
@@ -404,7 +409,7 @@ void render_demo( TinyWindow::tWindow* window, float dT )
 			u8"\n"
 			u8"Texture atlas caching uses naïve grid placement; this wastes a lot of space but ensures interchangeable cache slots allowing for\n"
 			u8"straight up LRU ( Least Recently Used ) caching scheme to be employed.\n"
-			u8"The font atlas is a single 4k x 2k R8 texture divided into 4 regions:"
+			u8"The hb_font atlas is a single 4k x 2k R8 texture divided into 4 regions:"
 			;
 		std::string caching_strategy = 
 			u8"                         2k\n"
@@ -451,7 +456,7 @@ void render_demo( TinyWindow::tWindow* window, float dT )
 			u8"incididunt ut labore et dolore magna aliqua. Est ullamcorper eget nulla facilisi\n"
 			u8"etiam dignissim diam quis enim. Convallis convallis tellus id interdum.";
 		ve_fontcache_draw_text( &cache, title_font, u8"Showcase", 0.2f, current_scroll - ( section_start + 0.2f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, print_font, u8"This is a showcase demonstrating different font categories and languages.", 0.2f, current_scroll - ( section_start + 0.24f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, print_font, u8"This is a showcase demonstrating different hb_font categories and languages.", 0.2f, current_scroll - ( section_start + 0.24f ), 1.0f / window_size.width,  1.0f / window_size.height );
 	
 		ve_fontcache_draw_text( &cache, print_font, u8"Sans serif", 0.2f, current_scroll - ( section_start + 0.28f ), 1.0f / window_size.width,  1.0f / window_size.height );
 		ve_fontcache_draw_text( &cache, demo_sans_font, font_family_test, 0.3f, current_scroll - ( section_start + 0.28f ), 1.0f / window_size.width,  1.0f / window_size.height );
@@ -477,7 +482,9 @@ void render_demo( TinyWindow::tWindow* window, float dT )
 		ve_fontcache_draw_text( &cache, print_font, u8"Korean", 0.2f, current_scroll - ( section_start + 0.92f ), 1.0f / window_size.width,  1.0f / window_size.height );
 		ve_fontcache_draw_text( &cache, demo_korean_font, u8"그들의 장비와 기구는 모두 살아 있다.", 0.3f, current_scroll - ( section_start + 0.92f ), 1.0f / window_size.width,  1.0f / window_size.height );
 		ve_fontcache_draw_text( &cache, print_font, u8"Arabic", 0.2f, current_scroll - ( section_start + 0.96f ), 1.0f / window_size.width,  1.0f / window_size.height );
-		ve_fontcache_draw_text( &cache, demo_arabic_font, u8"الحب سماء لا تمطر غير الأحلام. (Sorry broken, coming Soon!)", 0.3f, current_scroll - ( section_start + 0.96f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, demo_arabic_font, u8"حب السماء لا تمطر غير الأحلام. This one needs HarfBuzz to work!", 0.3f, current_scroll - ( section_start + 0.96f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, print_font, u8"Hebrew", 0.2f, current_scroll - ( section_start + 1.0f ), 1.0f / window_size.width,  1.0f / window_size.height );
+		ve_fontcache_draw_text( &cache, demo_hebrew_font, u8"אז הגיע הלילה של כוכב השביט הראשון. This one needs HarfBuzz to work!", 0.3f, current_scroll - ( section_start + 1.0f ), 1.0f / window_size.width,  1.0f / window_size.height );
 	}
 
 	section_start = 2.1f; section_end = section_start + 2.23f;
@@ -547,7 +554,7 @@ void render_demo( TinyWindow::tWindow* window, float dT )
 		ve_fontcache_set_colour( &cache, code_colour );
 	}
 
-	section_start = 3.3f; section_end = 4.7;
+	section_start = 3.3f; section_end = 5.1;
 	if ( current_scroll > section_start && current_scroll < section_end )
 	{
 		const int GRID_W = 30, GRID_H = 15, GRID2_W = 8, GRID2_H = 2, GRID3_W = 16, GRID3_H = 4;
@@ -578,12 +585,12 @@ void render_demo( TinyWindow::tWindow* window, float dT )
 		auto codepoint_to_utf8 = []( char *c, int chr ) {
 			if (0 == chr) {
 				return;
-			} else if (0 == ((utf8_int32_t)0xffffff80 & chr)) {
+			} else if (0 == ((int32_t)0xffffff80 & chr)) {
 				c[0] = (char)chr;
-			} else if (0 == ((utf8_int32_t)0xfffff800 & chr)) {
+			} else if (0 == ((int32_t)0xfffff800 & chr)) {
 				c[0] = 0xc0 | (char)(chr >> 6);
 				c[1] = 0x80 | (char)(chr & 0x3f);
-			} else if (0 == ((utf8_int32_t)0xffff0000 & chr)) {
+			} else if (0 == ((int32_t)0xffff0000 & chr)) {
 				c[0] = 0xe0 | (char)(chr >> 12);
 				c[1] = 0x80 | (char)((chr >> 6) & 0x3f);
 				c[2] = 0x80 | (char)(chr & 0x3f);
@@ -722,7 +729,7 @@ int main()
 	fontcache_shader_draw_text = compile_shader( vs_source_draw_text, fs_source_draw_text );
 	setup_fbo();
 
-#ifndef VE_FONTCACHE_DEBUGPRINT && 0
+#ifndef VE_FONTCACHE_DEBUGPRINT
 	const int numGlyphs = 1024;
 	{
 		auto start = std::chrono::high_resolution_clock::now();

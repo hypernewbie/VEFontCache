@@ -1064,8 +1064,8 @@ static int find_extensionsGL(void) {
 static void find_coreGL(void) {
 
     /* Thank you @elmindreda
-     * https://github.com/elmindreda/greg/blob/master/templates/greg.c.in#L176
-     * https://github.com/glfw/glfw/blob/master/src/context.c#L36
+     * https://github.com/elmindreda/greg/hb_blob/master/templates/greg.c.in#L176
+     * https://github.com/glfw/glfw/hb_blob/master/src/context.c#L36
      */
     int i, major, minor;
 

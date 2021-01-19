@@ -21,7 +21,7 @@
 //
 //   Mikko Mononen: compound shape support, more cmap formats
 //   Tor Andersson: kerning, subpixel rendering
-//   Dougall Johnson: OpenType / Type 2 font handling
+//   Dougall Johnson: OpenType / Type 2 hb_font handling
 //   Daniel Ribeiro Maciel: basic GPOS-based kerning
 //
 //   Misc other:
@@ -89,7 +89,7 @@
 //      #define STBTT_STATIC
 //
 //   Simple 3D API (don't ship this, but it's fine for tools and quick start)
-//           stbtt_BakeFontBitmap()               -- bake a font to a bitmap for use as texture
+//           stbtt_BakeFontBitmap()               -- bake a hb_font to a bitmap for use as texture
 //           stbtt_GetBakedQuad()                 -- compute quad to draw for a given char
 //
 //   Improved 3D API (more shippable):
@@ -100,10 +100,10 @@
 //           stbtt_PackEnd()
 //           stbtt_GetPackedQuad()
 //
-//   "Load" a font file from a memory buffer (you have to keep the buffer loaded)
+//   "Load" a hb_font file from a memory buffer (you have to keep the buffer loaded)
 //           stbtt_InitFont()
-//           stbtt_GetFontOffsetForIndex()        -- indexing for TTC font collections
-//           stbtt_GetNumberOfFonts()             -- number of fonts for TTC font collections
+//           stbtt_GetFontOffsetForIndex()        -- indexing for TTC hb_font collections
+//           stbtt_GetNumberOfFonts()             -- number of fonts for TTC hb_font collections
 //
 //   Render a unicode codepoint to a bitmap
 //           stbtt_GetCodepointBitmap()           -- allocates and returns a bitmap
@@ -144,7 +144,7 @@
 //         some glyph)
 //
 //      Glyph index
-//         A font-specific integer ID representing a glyph
+//         A hb_font-specific integer ID representing a glyph
 //
 //      Baseline
 //         Glyph shapes are defined relative to a baseline, which is the
@@ -157,24 +157,24 @@
 //         position is the baseline. Even "baked fonts" use this model.
 //
 //      Vertical Font Metrics
-//         The vertical qualities of the font, used to vertically position
+//         The vertical qualities of the hb_font, used to vertically position
 //         and space the characters. See docs for stbtt_GetFontVMetrics.
 //
 //      Font Size in Pixels or Points
-//         The preferred interface for specifying font sizes in stb_truetype
-//         is to specify how tall the font's vertical extent should be in pixels.
+//         The preferred interface for specifying hb_font sizes in stb_truetype
+//         is to specify how tall the hb_font's vertical extent should be in pixels.
 //         If that sounds good enough, skip the next paragraph.
 //
-//         Most font APIs instead use "points", which are a common typographic
-//         measurement for describing font size, defined as 72 points per inch.
+//         Most hb_font APIs instead use "points", which are a common typographic
+//         measurement for describing hb_font size, defined as 72 points per inch.
 //         stb_truetype provides a point API for compatibility. However, true
 //         "per inch" conventions don't make much sense on computer displays
 //         since different monitors have different number of pixels per
 //         inch. For example, Windows traditionally uses a convention that
 //         there are 96 pixels per inch, thus making 'inch' measurements have
 //         nothing to do with inches, and thus effectively defining a point to
-//         be 1.333 pixels. Additionally, the TrueType font data provides
-//         an explicit scale factor to scale a given font's glyphs to points,
+//         be 1.333 pixels. Additionally, the TrueType hb_font data provides
+//         an explicit scale factor to scale a given hb_font's glyphs to points,
 //         but the author has observed that this scale factor is often wrong
 //         for non-commercial fonts, thus making fonts scaled in points
 //         according to the TrueType spec incoherently sized in practice.
@@ -182,7 +182,7 @@
 // DETAILED USAGE:
 //
 //  Scale:
-//    Select how high you want the font to be, in points or pixels.
+//    Select how high you want the hb_font to be, in points or pixels.
 //    Call ScaleForPixelHeight or ScaleForMappingEmToPixels to compute
 //    a scale factor SF that will be used by all other functions.
 //
@@ -196,7 +196,7 @@
 //
 //  Current point:
 //    Set the current point where the first character will appear. The
-//    first character could extend left of the current point; this is font
+//    first character could extend left of the current point; this is hb_font
 //    dependent. You can either choose a current point that is the leftmost
 //    point and hope, or add some padding, or check the bounding box or
 //    left-side-bearing of the first character to be displayed and set
@@ -217,7 +217,7 @@
 //   Quality:
 //
 //    - Use the functions with Subpixel at the end to allow your characters
-//      to have subpixel positioning. Since the font is anti-aliased, not
+//      to have subpixel positioning. Since the hb_font is anti-aliased, not
 //      hinted, this is very import for quality. (This is not possible with
 //      baked fonts.)
 //
@@ -241,7 +241,7 @@
 //   on little-endian systems (the data is big-endian), but assuming you're
 //   caching the bitmaps or glyph shapes this shouldn't be a big deal.
 //
-//   It appears to be very hard to programmatically determine what font a
+//   It appears to be very hard to programmatically determine what hb_font a
 //   given file is in a general way. I provide an API for this, but I don't
 //   recommend it.
 //
@@ -319,14 +319,14 @@ char ttf_buffer[1<<25];
 
 int main(int argc, char **argv)
 {
-   stbtt_fontinfo font;
+   stbtt_fontinfo hb_font;
    unsigned char *bitmap;
    int w,h,i,j,c = (argc > 1 ? atoi(argv[1]) : 'a'), s = (argc > 2 ? atoi(argv[2]) : 20);
 
    fread(ttf_buffer, 1, 1<<25, fopen(argc > 3 ? argv[3] : "c:/windows/fonts/arialbd.ttf", "rb"));
 
-   stbtt_InitFont(&font, ttf_buffer, stbtt_GetFontOffsetForIndex(ttf_buffer,0));
-   bitmap = stbtt_GetCodepointBitmap(&font, 0,stbtt_ScaleForPixelHeight(&font, s), c, &w, &h, 0,0);
+   stbtt_InitFont(&hb_font, ttf_buffer, stbtt_GetFontOffsetForIndex(ttf_buffer,0));
+   bitmap = stbtt_GetCodepointBitmap(&hb_font, 0,stbtt_ScaleForPixelHeight(&hb_font, s), c, &w, &h, 0,0);
 
    for (j=0; j < h; ++j) {
       for (i=0; i < w; ++i)
@@ -360,31 +360,31 @@ unsigned char screen[20][79];
 
 int main(int arg, char **argv)
 {
-   stbtt_fontinfo font;
+   stbtt_fontinfo hb_font;
    int i,j,ascent,baseline,ch=0;
    float scale, xpos=2; // leave a little padding in case the character extends left
    char *text = "Heljo World!"; // intentionally misspelled to show 'lj' brokenness
 
    fread(buffer, 1, 1000000, fopen("c:/windows/fonts/arialbd.ttf", "rb"));
-   stbtt_InitFont(&font, buffer, 0);
+   stbtt_InitFont(&hb_font, buffer, 0);
 
-   scale = stbtt_ScaleForPixelHeight(&font, 15);
-   stbtt_GetFontVMetrics(&font, &ascent,0,0);
+   scale = stbtt_ScaleForPixelHeight(&hb_font, 15);
+   stbtt_GetFontVMetrics(&hb_font, &ascent,0,0);
    baseline = (int) (ascent*scale);
 
    while (text[ch]) {
       int advance,lsb,x0,y0,x1,y1;
       float x_shift = xpos - (float) floor(xpos);
-      stbtt_GetCodepointHMetrics(&font, text[ch], &advance, &lsb);
-      stbtt_GetCodepointBitmapBoxSubpixel(&font, text[ch], scale,scale,x_shift,0, &x0,&y0,&x1,&y1);
-      stbtt_MakeCodepointBitmapSubpixel(&font, &screen[baseline + y0][(int) xpos + x0], x1-x0,y1-y0, 79, scale,scale,x_shift,0, text[ch]);
+      stbtt_GetCodepointHMetrics(&hb_font, text[ch], &advance, &lsb);
+      stbtt_GetCodepointBitmapBoxSubpixel(&hb_font, text[ch], scale,scale,x_shift,0, &x0,&y0,&x1,&y1);
+      stbtt_MakeCodepointBitmapSubpixel(&hb_font, &screen[baseline + y0][(int) xpos + x0], x1-x0,y1-y0, 79, scale,scale,x_shift,0, text[ch]);
       // note that this stomps the old data, so where character boxes overlap (e.g. 'lj') it's wrong
       // because this API is really for baking character bitmaps into textures. if you want to render
       // a sequence of characters, you really need to render each bitmap to a temp buffer, then
       // "alpha blend" that into the working buffer
       xpos += (advance * scale);
       if (text[ch+1])
-         xpos += scale*stbtt_GetCodepointKernAdvance(&font, text[ch],text[ch+1]);
+         xpos += scale*stbtt_GetCodepointKernAdvance(&hb_font, text[ch],text[ch+1]);
       ++ch;
    }
 
@@ -516,8 +516,8 @@ typedef struct
    float xoff,yoff,xadvance;
 } stbtt_bakedchar;
 
-STBTT_DEF int stbtt_BakeFontBitmap(const unsigned char *data, int offset,  // font location (use offset=0 for plain .ttf)
-                                float pixel_height,                     // height of font in pixels
+STBTT_DEF int stbtt_BakeFontBitmap(const unsigned char *data, int offset,  // hb_font location (use offset=0 for plain .ttf)
+                                float pixel_height,                     // height of hb_font in pixels
                                 unsigned char *pixels, int pw, int ph,  // bitmap to be filled in
                                 int first_char, int num_chars,          // characters to bake
                                 stbtt_bakedchar *chardata);             // you allocate this, it's num_chars long
@@ -548,7 +548,7 @@ STBTT_DEF void stbtt_GetBakedQuad(const stbtt_bakedchar *chardata, int pw, int p
 // It's inefficient; you might want to c&p it and optimize it.
 
 STBTT_DEF void stbtt_GetScaledFontVMetrics(const unsigned char *fontdata, int index, float size, float *ascent, float *descent, float *lineGap);
-// Query the font vertical metrics without having to create a font first.
+// Query the hb_font vertical metrics without having to create a hb_font first.
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -589,7 +589,7 @@ STBTT_DEF void stbtt_PackEnd  (stbtt_pack_context *spc);
 
 STBTT_DEF int  stbtt_PackFontRange(stbtt_pack_context *spc, const unsigned char *fontdata, int font_index, float font_size,
                                 int first_unicode_char_in_range, int num_chars_in_range, stbtt_packedchar *chardata_for_range);
-// Creates character bitmaps from the font_index'th font found in fontdata (use
+// Creates character bitmaps from the font_index'th hb_font found in fontdata (use
 // font_index=0 if you don't know what that is). It creates num_chars_in_range
 // bitmaps for characters with unicode values starting at first_unicode_char_in_range
 // and increasing. Data for how to render them is stored in chardata_for_range;
@@ -599,7 +599,7 @@ STBTT_DEF int  stbtt_PackFontRange(stbtt_pack_context *spc, const unsigned char 
 // as computed by stbtt_ScaleForPixelHeight. To use a point size as computed
 // by stbtt_ScaleForMappingEmToPixels, wrap the point size in STBTT_POINT_SIZE()
 // and pass that result as 'font_size':
-//       ...,                  20 , ... // font max minus min y is 20 pixels tall
+//       ...,                  20 , ... // hb_font max minus min y is 20 pixels tall
 //       ..., STBTT_POINT_SIZE(20), ... // 'M' is 20 pixels tall
 
 typedef struct
@@ -619,7 +619,7 @@ STBTT_DEF int  stbtt_PackFontRanges(stbtt_pack_context *spc, const unsigned char
 // times within a single PackBegin/PackEnd.
 
 STBTT_DEF void stbtt_PackSetOversampling(stbtt_pack_context *spc, unsigned int h_oversample, unsigned int v_oversample);
-// Oversampling a font increases the quality by allowing higher-quality subpixel
+// Oversampling a hb_font increases the quality by allowing higher-quality subpixel
 // positioning, and is especially valuable at smaller text sizes.
 //
 // This function sets the amount of oversampling for all following calls to
@@ -637,7 +637,7 @@ STBTT_DEF void stbtt_PackSetOversampling(stbtt_pack_context *spc, unsigned int h
 STBTT_DEF void stbtt_PackSetSkipMissingCodepoints(stbtt_pack_context *spc, int skip);
 // If skip != 0, this tells stb_truetype to skip any codepoints for which
 // there is no corresponding glyph. If skip=0, which is the default, then
-// codepoints without a glyph recived the font's "missing character" glyph,
+// codepoints without a glyph recived the hb_font's "missing character" glyph,
 // typically an empty box by convention.
 
 STBTT_DEF void stbtt_GetPackedQuad(const stbtt_packedchar *chardata, int pw, int ph,  // same data as above
@@ -651,7 +651,7 @@ STBTT_DEF void stbtt_PackFontRangesPackRects(stbtt_pack_context *spc, stbrp_rect
 STBTT_DEF int  stbtt_PackFontRangesRenderIntoRects(stbtt_pack_context *spc, const stbtt_fontinfo *info, stbtt_pack_range *ranges, int num_ranges, stbrp_rect *rects);
 // Calling these functions in sequence is roughly equivalent to calling
 // stbtt_PackFontRanges(). If you more control over the packing of multiple
-// fonts, or if you want to pack custom data into a font texture, take a look
+// fonts, or if you want to pack custom data into a hb_font texture, take a look
 // at the source to of stbtt_PackFontRanges() and create a custom version 
 // using these functions, e.g. call GatherRects multiple times,
 // building up a single array of rects, then call PackRects once,
@@ -681,17 +681,17 @@ struct stbtt_pack_context {
 //
 
 STBTT_DEF int stbtt_GetNumberOfFonts(const unsigned char *data);
-// This function will determine the number of fonts in a font file.  TrueType
-// collection (.ttc) files may contain multiple fonts, while TrueType font
-// (.ttf) files only contain one font. The number of fonts can be used for
+// This function will determine the number of fonts in a hb_font file.  TrueType
+// collection (.ttc) files may contain multiple fonts, while TrueType hb_font
+// (.ttf) files only contain one hb_font. The number of fonts can be used for
 // indexing with the previous function where the index is between zero and one
 // less than the total fonts. If an error occurs, -1 is returned.
 
 STBTT_DEF int stbtt_GetFontOffsetForIndex(const unsigned char *data, int index);
-// Each .ttf/.ttc file may have more than one font. Each font has a sequential
-// index number starting from 0. Call this function to get the font offset for
+// Each .ttf/.ttc file may have more than one hb_font. Each hb_font has a sequential
+// index number starting from 0. Call this function to get the hb_font offset for
 // a given index; it returns -1 if the index is out of range. A regular .ttf
-// file will only define one font and it always be at offset 0, so it will
+// file will only define one hb_font and it always be at offset 0, so it will
 // return '0' for index 0, and -1 for all other indices.
 
 // The following structure is defined publicly so you can declare one on
@@ -700,7 +700,7 @@ struct stbtt_fontinfo
 {
    void           * userdata;
    unsigned char  * data;              // pointer to .ttf file
-   int              fontstart;         // offset of start of font
+   int              fontstart;         // offset of start of hb_font
 
    int numGlyphs;                     // number of glyphs, needed for range checking
 
@@ -708,16 +708,16 @@ struct stbtt_fontinfo
    int index_map;                     // a cmap mapping for our chosen character encoding
    int indexToLocFormat;              // format needed to map from glyph index to glyph
 
-   stbtt__buf cff;                    // cff font data
+   stbtt__buf cff;                    // cff hb_font data
    stbtt__buf charstrings;            // the charstring index
    stbtt__buf gsubrs;                 // global charstring subroutines index
    stbtt__buf subrs;                  // private charstring subroutines index
-   stbtt__buf fontdicts;              // array of font dicts
+   stbtt__buf fontdicts;              // array of hb_font dicts
    stbtt__buf fdselect;               // map from glyph to fontdict
 };
 
 STBTT_DEF int stbtt_InitFont(stbtt_fontinfo *info, const unsigned char *data, int offset);
-// Given an offset into the file that defines a font, this function builds
+// Given an offset into the file that defines a hb_font, this function builds
 // the necessary cached info for the rest of the system. You must allocate
 // the stbtt_fontinfo yourself, and stbtt_InitFont will fill it out. You don't
 // need to do anything special to free it, because the contents are pure
@@ -733,7 +733,7 @@ STBTT_DEF int stbtt_FindGlyphIndex(const stbtt_fontinfo *info, int unicode_codep
 // and you want a speed-up, call this function with the character you're
 // going to process, then use glyph-based functions instead of the
 // codepoint-based functions.
-// Returns 0 if the character codepoint is not defined in the font.
+// Returns 0 if the character codepoint is not defined in the hb_font.
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -742,7 +742,7 @@ STBTT_DEF int stbtt_FindGlyphIndex(const stbtt_fontinfo *info, int unicode_codep
 //
 
 STBTT_DEF float stbtt_ScaleForPixelHeight(const stbtt_fontinfo *info, float pixels);
-// computes a scale factor to produce a font whose "height" is 'pixels' tall.
+// computes a scale factor to produce a hb_font whose "height" is 'pixels' tall.
 // Height is measured as the distance from the highest ascender to the lowest
 // descender; in other words, it's equivalent to calling stbtt_GetFontVMetrics
 // and computing:
@@ -750,13 +750,13 @@ STBTT_DEF float stbtt_ScaleForPixelHeight(const stbtt_fontinfo *info, float pixe
 // so if you prefer to measure height by the ascent only, use a similar calculation.
 
 STBTT_DEF float stbtt_ScaleForMappingEmToPixels(const stbtt_fontinfo *info, float pixels);
-// computes a scale factor to produce a font whose EM size is mapped to
+// computes a scale factor to produce a hb_font whose EM size is mapped to
 // 'pixels' tall. This is probably what traditional APIs compute, but
 // I'm not positive.
 
 STBTT_DEF void stbtt_GetFontVMetrics(const stbtt_fontinfo *info, int *ascent, int *descent, int *lineGap);
-// ascent is the coordinate above the baseline the font extends; descent
-// is the coordinate below the baseline the font extends (i.e. it is typically negative)
+// ascent is the coordinate above the baseline the hb_font extends; descent
+// is the coordinate below the baseline the hb_font extends (i.e. it is typically negative)
 // lineGap is the spacing between one row's descent and the next row's ascent...
 // so you should advance the vertical position by "*ascent - *descent + *lineGap"
 //   these are expressed in unscaled coordinates, so you must multiply by
@@ -918,7 +918,7 @@ STBTT_DEF unsigned char * stbtt_GetCodepointSDF(const stbtt_fontinfo *info, floa
 // These functions compute a discretized SDF field for a single character, suitable for storing
 // in a single-channel texture, sampling with bilinear filtering, and testing against
 // larger than some threshold to produce scalable fonts.
-//        info              --  the font
+//        info              --  the hb_font
 //        scale             --  controls the size of the resulting SDF bitmap, same as it would be creating a regular bitmap
 //        glyph/codepoint   --  the character to generate the SDF for
 //        padding           --  extra "pixels" around the character which are filled with the distance to the character (not 0),
@@ -951,7 +951,7 @@ STBTT_DEF unsigned char * stbtt_GetCodepointSDF(const stbtt_fontinfo *info, floa
 //      choice of variables maps a range from 5 pixels outside the shape to
 //      2 pixels inside the shape to 0..255; this is intended primarily for apply
 //      outside effects only (the interior range is needed to allow proper
-//      antialiasing of the font at *smaller* sizes)
+//      antialiasing of the hb_font at *smaller* sizes)
 //
 // The function computes the SDF analytically at each SDF pixel, not by e.g.
 // building a higher-res bitmap and approximating it. In theory the quality
@@ -966,10 +966,10 @@ STBTT_DEF unsigned char * stbtt_GetCodepointSDF(const stbtt_fontinfo *info, floa
 
 //////////////////////////////////////////////////////////////////////////////
 //
-// Finding the right font...
+// Finding the right hb_font...
 //
 // You should really just solve this offline, keep your own tables
-// of what font is what, and don't try to get it out of the .ttf file.
+// of what hb_font is what, and don't try to get it out of the .ttf file.
 // That's because getting it out of the .ttf file is really hard, because
 // the names in the file can appear in many possible encodings, in many
 // possible languages, and e.g. if you need a case-insensitive comparison,
@@ -978,7 +978,7 @@ STBTT_DEF unsigned char * stbtt_GetCodepointSDF(const stbtt_fontinfo *info, floa
 //
 // But you can use the provided functions in two possible ways:
 //     stbtt_FindMatchingFont() will use *case-sensitive* comparisons on
-//             unicode-encoded names to try to find the font you want;
+//             unicode-encoded names to try to find the hb_font you want;
 //             you can run this before calling stbtt_InitFont()
 //
 //     stbtt_GetFontNameString() lets you get any of the various strings
@@ -987,9 +987,9 @@ STBTT_DEF unsigned char * stbtt_GetCodepointSDF(const stbtt_fontinfo *info, floa
 
 
 STBTT_DEF int stbtt_FindMatchingFont(const unsigned char *fontdata, const char *name, int flags);
-// returns the offset (not index) of the font that matches, or -1 if none
-//   if you use STBTT_MACSTYLE_DONTCARE, use a font name like "Arial Bold".
-//   if you use any other flag, use a font name like "Arial"; this checks
+// returns the offset (not index) of the hb_font that matches, or -1 if none
+//   if you use STBTT_MACSTYLE_DONTCARE, use a hb_font name like "Arial Bold".
+//   if you use any other flag, use a hb_font name like "Arial"; this checks
 //     the 'macStyle' header field; i don't know if fonts set this consistently
 #define STBTT_MACSTYLE_DONTCARE     0
 #define STBTT_MACSTYLE_BOLD         1
@@ -1263,7 +1263,7 @@ static int stbtt__isfont(stbtt_uint8 *font)
 {
    // check the version number
    if (stbtt_tag4(font, '1',0,0,0))  return 1; // TrueType 1
-   if (stbtt_tag(font, "typ1"))   return 1; // TrueType with type 1 font -- we don't support this!
+   if (stbtt_tag(font, "typ1"))   return 1; // TrueType with type 1 hb_font -- we don't support this!
    if (stbtt_tag(font, "OTTO"))   return 1; // OpenType with CFF
    if (stbtt_tag4(font, 0,1,0,0)) return 1; // OpenType 1.0
    if (stbtt_tag(font, "true"))   return 1; // Apple specification for TrueType fonts
@@ -1286,7 +1286,7 @@ static stbtt_uint32 stbtt__find_table(stbtt_uint8 *data, stbtt_uint32 fontstart,
 
 static int stbtt_GetFontOffsetForIndex_internal(unsigned char *font_collection, int index)
 {
-   // if it's just a font, there's only one valid index
+   // if it's just a hb_font, there's only one valid index
    if (stbtt__isfont(font_collection))
       return index == 0 ? 0 : -1;
 
@@ -1305,7 +1305,7 @@ static int stbtt_GetFontOffsetForIndex_internal(unsigned char *font_collection, 
 
 static int stbtt_GetNumberOfFonts_internal(unsigned char *font_collection)
 {
-   // if it's just a font, there's only one valid font
+   // if it's just a hb_font, there's only one valid hb_font
    if (stbtt__isfont(font_collection))
       return 1;
 
@@ -1394,7 +1394,7 @@ static int stbtt_InitFont_internal(stbtt_fontinfo *info, unsigned char *data, in
       if (charstrings == 0) return 0;
 
       if (fdarrayoff) {
-         // looks like a CID font
+         // looks like a CID hb_font
          if (!fdselectoff) return 0;
          stbtt__buf_seek(&b, fdarrayoff);
          info->fontdicts = stbtt__cff_get_index(&b);
@@ -3630,8 +3630,8 @@ STBTT_DEF void stbtt_MakeCodepointBitmap(const stbtt_fontinfo *info, unsigned ch
 //
 // This is SUPER-CRAPPY packing to keep source code small
 
-static int stbtt_BakeFontBitmap_internal(unsigned char *data, int offset,  // font location (use offset=0 for plain .ttf)
-                                float pixel_height,                     // height of font in pixels
+static int stbtt_BakeFontBitmap_internal(unsigned char *data, int offset,  // hb_font location (use offset=0 for plain .ttf)
+                                float pixel_height,                     // height of hb_font in pixels
                                 unsigned char *pixels, int pw, int ph,  // bitmap to be filled in
                                 int first_char, int num_chars,          // characters to bake
                                 stbtt_bakedchar *chardata)
@@ -4586,7 +4586,7 @@ STBTT_DEF void stbtt_FreeSDF(unsigned char *bitmap, void *userdata)
 
 //////////////////////////////////////////////////////////////////////////////
 //
-// font name matching -- recommended not to use this
+// hb_font name matching -- recommended not to use this
 //
 
 // check if a utf8 string contains a prefix which is the utf16 string; if so return length of matching utf8 string
@@ -4831,7 +4831,7 @@ STBTT_DEF int stbtt_CompareUTF8toUTF16_bigendian(const char *s1, int len1, const
 //   0.5  (2011-12-09) bugfixes:
 //                        subpixel glyph renderer computed wrong bounding box
 //                        first vertex of shape can be off-curve (FreeSans)
-//   0.4b (2011-12-03) fixed an error in the font baking example
+//   0.4b (2011-12-03) fixed an error in the hb_font baking example
 //   0.4  (2011-12-01) kerning, subpixel rendering (tor)
 //                    bugfixes for:
 //                        codepoint-to-glyph conversion using table fmt=12

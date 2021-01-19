@@ -174,6 +174,8 @@
 	}
 */
 
+#pragma once
+
 #include <cstdio>
 #include <vector>
 #include <memory>
@@ -195,8 +197,8 @@
 
 #ifndef VE_FONTCACHE_HARFBUZZ
 	#pragma message( "WARNING: Please include Harfbuzz and define VE_FONTCACHE_HARFBUZZ for production. Using default fallback dumbass non-portable unoptimised text shaper." )
-	#include "utf8.h"
 #endif // VE_FONTCACHE_HARFBUZZ
+#include "utf8.h"
 
 /*
 ---------------------------------- Font Atlas Caching Strategy --------------------------------------------
@@ -298,19 +300,28 @@ static_assert( VE_FONTCACHE_ATLAS_REGION_D_CAPACITY == 256, "VE FontCache Atlas 
 // Max. text size for caching. This means the cache has ~3.072mb upper bound.
 #define VE_FONTCACHE_SHAPECACHE_MAX_LENGTH 256
 
+// Sizes below this snap their advance to next pixel boundary.
+#define VE_FONTCACHE_ADVANCE_SNAP_SMALLFONT_SIZE 12
+
 // --------------------------------------------------------------- Data Types ---------------------------------------------------
 
 typedef int64_t ve_font_id;
 typedef int32_t ve_codepoint;
+typedef int32_t ve_glyph;
 typedef char ve_atlas_region;
 
 struct ve_fontcache_entry
 {
 	ve_font_id font_id = 0;
-	bool used = false;
 	stbtt_fontinfo info;
+	bool used = false;
 	float size = 24.0f;
 	float size_scale = 1.0f;
+#ifdef VE_FONTCACHE_HARFBUZZ
+	hb_blob_t* hb_blob = nullptr;
+	hb_face_t* hb_face = nullptr;
+	hb_font_t* hb_font = nullptr;
+#endif // VE_FONTCACHE_HARFBUZZ
 };
 
 struct ve_fontcache_vertex
@@ -394,8 +405,9 @@ struct ve_fontcache_atlas
 
 struct ve_fontcache_shaped_text
 {
-	std::vector< ve_codepoint > codepoints;
+	std::vector< ve_glyph > glyphs;
 	std::vector< ve_fontcache_vec2 > pos;
+	ve_fontcache_vec2 end_cursor_pos;
 };
 
 struct ve_fontcache_shaped_text_cache
@@ -408,15 +420,23 @@ struct ve_fontcache_shaped_text_cache
 struct ve_fontcache
 {
 	std::vector< ve_fontcache_entry > entry;
+
 	std::vector< ve_fontcache_vec2 > temp_path;
 	std::unordered_map< uint64_t, bool > temp_codepoint_seen;
+
 	uint32_t snap_width = 0;
 	uint32_t snap_height = 0;
 	float colour[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	ve_fontcache_vec2 cursor_pos;
 
 	ve_fontcache_drawlist drawlist;
 	ve_fontcache_atlas atlas;
 	ve_fontcache_shaped_text_cache shape_cache;
+
+	bool text_shape_advanced = true;
+#ifdef VE_FONTCACHE_HARFBUZZ
+	hb_buffer_t* hb_text_buffer = nullptr;
+#endif // VE_FONTCACHE_HARFBUZZ
 };
 
 // --------------------------------------------------------------------- VEFontCache Function Declarations -------------------------------------------------------------
@@ -427,21 +447,24 @@ void ve_fontcache_init( ve_fontcache* cache );
 // Call this to shutdown everything.
 void ve_fontcache_shutdown( ve_fontcache* cache );
 
-// Load font from in-memory buffer. Supports otf, ttf, everything STB_truetype supports.
-//     Caller still owns data and must hold onto it; This buffer cannot be freed while font is still being used.
+// Load hb_font from in-memory buffer. Supports otf, ttf, everything STB_truetype supports.
+//     Caller still owns data and must hold onto it; This buffer cannot be freed while hb_font is still being used.
 //     SBTTT will keep track of weak pointers into this memory.
-//     If you're loading the same font at different size_px values, it is OK to share the same data buffer amongst them.
+//     If you're loading the same hb_font at different size_px values, it is OK to share the same data buffer amongst them.
 //
-ve_font_id ve_fontcache_load( ve_fontcache* cache, const void* data, float size_px = 24.0f );
+ve_font_id ve_fontcache_load( ve_fontcache* cache, const void* data, size_t data_size, float size_px = 24.0f );
 
-// Load font from file. Supports otf, ttf, everything STB_truetype supports.
-//     Caller still owns given buffer and must hold onto it. This buffer cannot be freed while font is still being used.
+// Load hb_font from file. Supports otf, ttf, everything STB_truetype supports.
+//     Caller still owns given buffer and must hold onto it. This buffer cannot be freed while hb_font is still being used.
 //     SBTTT will keep track of weak pointers into this memory.
-//     If you're loading the same font at different size_px values, it is OK to share the same buffer amongst them.
+//     If you're loading the same hb_font at different size_px values, it is OK to share the same buffer amongst them.
 //
 ve_font_id ve_fontcache_loadfile( ve_fontcache* cache, const char* filename, std::vector< uint8_t >& buffer, float size_px = 24.0f );
 
-// Configure snapping glyphs to pixel border when font is rendered to 2D screen. May affect kerning. This may be changed at any time.
+// Unload a font and relase memory. Calling ve_fontcache_shutdown already does this on all loaded fonts.
+void ve_fontcache_unload( ve_fontcache* cache, ve_font_id id );
+
+// Configure snapping glyphs to pixel border when hb_font is rendered to 2D screen. May affect kerning. This may be changed at any time.
 // Set both to zero to disable pixel snapping.
 void ve_fontcache_configure_snap( ve_fontcache* cache, uint32_t snap_width = 0, uint32_t snap_height = 0 );
 
@@ -455,6 +478,9 @@ void ve_fontcache_flush_drawlist( ve_fontcache* cache );
 //
 bool ve_fontcache_draw_text( ve_fontcache* cache, ve_font_id font, const std::string& text_utf8, float posx = 0.0f, float posy = 0.0f, float scalex = 1.0f, float scaley = 1.0f );
 
+// Get where the last ve_fontcache_draw_text call left off.
+ve_fontcache_vec2 ve_fontcache_get_cursor_pos( ve_fontcache* cache );
+
 // Merges drawcalls. Significantly improves drawcall overhead, highly recommended. Call this before looping through and executing drawlist.
 void ve_fontcache_optimise_drawlist( ve_fontcache* cache );
 
@@ -463,6 +489,11 @@ ve_fontcache_drawlist* ve_fontcache_get_drawlist( ve_fontcache* cache );
 
 // Set text colour of subsequent text draws.
 void ve_fontcache_set_colour( ve_fontcache* cache, float c[4] );
+
+inline void ve_fontcache_enable_advanced_text_shaping( ve_fontcache* cache, bool enabled = true )
+{
+	cache->text_shape_advanced = enabled;
+}
 
 // --------------------------------------------------------------------- Generic Data Structure Declarations -------------------------------------------------------------
 
@@ -493,7 +524,7 @@ void ve_fontcache_init( ve_fontcache* cache )
 	// Reserve global context data.
 	cache->entry.reserve( 8 );
 	cache->temp_path.reserve( 256 );
-	cache->temp_codepoint_seen.reserve( 256 );
+	cache->temp_codepoint_seen.reserve( 512 );
 	cache->drawlist.vertices.reserve( 4096 );
 	cache->drawlist.indices.reserve( 8192 );
 	cache->drawlist.dcalls.reserve( 512 );
@@ -512,7 +543,7 @@ void ve_fontcache_init( ve_fontcache* cache )
 	ve_fontcache_LRU_init( cache->shape_cache.state, VE_FONTCACHE_SHAPECACHE_SIZE );
 	cache->shape_cache.storage.resize( VE_FONTCACHE_SHAPECACHE_SIZE );
 	for ( int i = 0; i < VE_FONTCACHE_SHAPECACHE_SIZE; i++ ) {
-		cache->shape_cache.storage[ i ].codepoints.reserve( VE_FONTCACHE_SHAPECACHE_RESERVE_LENGTH );
+		cache->shape_cache.storage[ i ].glyphs.reserve( VE_FONTCACHE_SHAPECACHE_RESERVE_LENGTH );
 		cache->shape_cache.storage[ i ].pos.reserve( VE_FONTCACHE_SHAPECACHE_RESERVE_LENGTH );
 	}
 
@@ -523,14 +554,25 @@ void ve_fontcache_init( ve_fontcache* cache )
 	cache->atlas.glyph_update_batch_clear_drawlist.dcalls.reserve( VE_FONTCACHE_GLYPHDRAW_BUFFER_BATCH * 2 );
 	cache->atlas.glyph_update_batch_clear_drawlist.vertices.reserve( VE_FONTCACHE_GLYPHDRAW_BUFFER_BATCH * 2 * 4 );
 	cache->atlas.glyph_update_batch_clear_drawlist.indices.reserve( VE_FONTCACHE_GLYPHDRAW_BUFFER_BATCH * 2 * 6 );
+
+#ifdef VE_FONTCACHE_HARFBUZZ
+	cache->hb_text_buffer = hb_buffer_create();
+#endif // VE_FONTCACHE_HARFBUZZ
 }
 
 void ve_fontcache_shutdown( ve_fontcache* cache )
 {
 	STBTT_assert( cache );
+	for ( ve_fontcache_entry& et : cache->entry ) {
+		ve_fontcache_unload( cache, et.font_id );
+	}
+#ifdef VE_FONTCACHE_HARFBUZZ
+	if ( cache->hb_text_buffer )
+		hb_buffer_destroy( cache->hb_text_buffer );
+#endif // VE_FONTCACHE_HARFBUZZ
 }
 
-ve_font_id ve_fontcache_load( ve_fontcache* cache, const void* data, float size_px )
+ve_font_id ve_fontcache_load( ve_fontcache* cache, const void* data, size_t data_size, float size_px )
 {
 	STBTT_assert( cache );
 	if ( !data  ) return -1;
@@ -549,7 +591,7 @@ ve_font_id ve_fontcache_load( ve_fontcache* cache, const void* data, float size_
 	}
 	STBTT_assert( id >= 0 && id < cache->entry.size() );
 
-	// Load font from memory.
+	// Load hb_font from memory.
 	auto& et = cache->entry[id];
 	int success = stbtt_InitFont( &et.info, ( const unsigned char* ) data, 0 );
 	if ( !success ) {
@@ -559,6 +601,12 @@ ve_font_id ve_fontcache_load( ve_fontcache* cache, const void* data, float size_
 	et.size = size_px;
 	et.size_scale = size_px < 0.0f ? stbtt_ScaleForPixelHeight( &et.info, -size_px ) : stbtt_ScaleForMappingEmToPixels( &et.info, size_px );
 	et.used = true;
+
+#ifdef VE_FONTCACHE_HARFBUZZ
+	et.hb_blob = hb_blob_create( ( const char* ) data, data_size, HB_MEMORY_MODE_READONLY, ( void* )( uintptr_t ) id, nullptr );
+	et.hb_face = hb_face_create( et.hb_blob, 0 );
+	et.hb_font = hb_font_create( et.hb_face );
+#endif // VE_FONTCACHE_HARFBUZZ
 
 	return id;
 }
@@ -580,8 +628,32 @@ ve_font_id ve_fontcache_loadfile( ve_fontcache* cache, const char* filename, std
 	}
 	fclose( fp );
 
-	ve_font_id ret = ve_fontcache_load( cache, buffer.data(), size_px );
+	ve_font_id ret = ve_fontcache_load( cache, buffer.data(), buffer.size(), size_px );
 	return ret;
+}
+
+void ve_fontcache_unload( ve_fontcache* cache, ve_font_id font )
+{
+	STBTT_assert( cache );
+	STBTT_assert( font >= 0 && font < cache->entry.size() );
+	
+	auto& et = cache->entry[ font ];
+	et.used = false;
+
+#ifdef VE_FONTCACHE_HARFBUZZ
+	if ( et.hb_font ) {
+		hb_font_destroy( et.hb_font );
+		et.hb_font = nullptr;
+	}
+	if ( et.hb_face ) {
+		hb_face_destroy( et.hb_face );
+		et.hb_face = nullptr;
+	}
+	if ( et.hb_blob ) {
+		hb_blob_destroy( et.hb_blob );
+		et.hb_blob = nullptr;
+	}
+#endif // VE_FONTCACHE_HARFBUZZ
 }
 
 void ve_fontcache_configure_snap( ve_fontcache* cache, uint32_t snap_width, uint32_t snap_height )
@@ -701,16 +773,15 @@ void ve_fontcache_blit_quad( ve_fontcache_drawlist& drawlist, float x0 = 0.0f, f
 }
 
 bool ve_fontcache_cache_glyph(
-	ve_fontcache* cache, ve_font_id font, ve_codepoint unicode,
+	ve_fontcache* cache, ve_font_id font, ve_glyph glyph_index,
 	float scaleX = 1.0f, float scaleY = 1.0f, float translateX = 0.0f, float translateY = 0.0f )
 {
 	STBTT_assert( cache );
 	STBTT_assert( font >= 0 && font < cache->entry.size() );
 	ve_fontcache_entry& entry = cache->entry[ font ];
 	
-	int glyph_index = stbtt_FindGlyphIndex( &entry.info, ( int ) unicode );
 	if ( !glyph_index ) {
-		// Glyph not in current font.
+		// Glyph not in current hb_font.
 		return false;
 	}
 
@@ -818,14 +889,14 @@ static ve_atlas_region ve_fontcache_decide_codepoint_region( ve_fontcache* cache
 	if ( stbtt_IsGlyphEmpty( &entry.info, glyph_index ) )
 		return '\0';
 
-	// Get font text metrics. These are unscaled!
+	// Get hb_font text metrics. These are unscaled!
 	int bounds_x0, bounds_x1, bounds_y0, bounds_y1;
 	int success = stbtt_GetGlyphBox( &entry.info, glyph_index, &bounds_x0, &bounds_y0, &bounds_x1, &bounds_y1 );
 	int bounds_width = bounds_x1 - bounds_x0, bounds_height = bounds_y1 - bounds_y0;
 	STBTT_assert( success );
 
 	// Decide which atlas to target. This logic should work well for reasonable on-screen text sizes of around 24px.
-	// For 4k+ displays, caching font at a lower pt and drawing it upscaled at a higher pt is recommended.
+	// For 4k+ displays, caching hb_font at a lower pt and drawing it upscaled at a higher pt is recommended.
 	// 
 	ve_atlas_region region;
 	float bwidth_scaled = bounds_width * entry.size_scale + 2.0f * VE_FONTCACHE_ATLAS_GLYPH_PADDING, bheight_scaled = bounds_height * entry.size_scale + 2.0f * VE_FONTCACHE_ATLAS_GLYPH_PADDING;
@@ -929,21 +1000,20 @@ static void ve_fontcache_atlas_bbox( ve_atlas_region region, int local_idx, floa
 	}
 }
 
-void ve_fontcache_cache_codepoint_to_atlas( ve_fontcache* cache, ve_font_id font, ve_codepoint unicode )
+void ve_fontcache_cache_glyph_to_atlas( ve_fontcache* cache, ve_font_id font, ve_glyph glyph_index )
 {
 	STBTT_assert( cache );
 	STBTT_assert( font >= 0 && font < cache->entry.size() );
 	ve_fontcache_entry& entry = cache->entry[ font ];
 
-	int glyph_index = stbtt_FindGlyphIndex( &entry.info, ( int ) unicode );
 	if ( !glyph_index ) {
-		// Glyph not in current font.
+		// Glyph not in current hb_font.
 		return;
 	}
 	if ( stbtt_IsGlyphEmpty( &entry.info, glyph_index ) )
 		return;
 
-	// Get font text metrics. These are unscaled!
+	// Get hb_font text metrics. These are unscaled!
 	int bounds_x0, bounds_x1, bounds_y0, bounds_y1;
 	int success = stbtt_GetGlyphBox( &entry.info, glyph_index, &bounds_x0, &bounds_y0, &bounds_x1, &bounds_y1 );
 	int bounds_width = bounds_x1 - bounds_x0, bounds_height = bounds_y1 - bounds_y0;
@@ -958,7 +1028,7 @@ void ve_fontcache_cache_codepoint_to_atlas( ve_fontcache* cache, ve_font_id font
 	if ( region == '\0' || region == 'E' ) return;
 
 	// Grab an atlas LRU cache slot.
-	uint64_t lru_code = unicode +  ( ( 0x100000000ULL * font ) & 0xFFFFFFFF00000000ULL );
+	uint64_t lru_code = glyph_index +  ( ( 0x100000000ULL * font ) & 0xFFFFFFFF00000000ULL );
 	int atlas_index = ve_fontcache_LRU_get( *state, lru_code );
 	if ( atlas_index == -1 ) {
 		if ( *next_idx < state->capacity ) {
@@ -1036,7 +1106,7 @@ void ve_fontcache_cache_codepoint_to_atlas( ve_fontcache* cache, ve_font_id font
 
 	// Render glyph to glyph_update_FBO.
 	ve_fontcache_cache_glyph(
-		cache, font, unicode,
+		cache, font, glyph_index,
 		glyph_draw_scale_x, glyph_draw_scale_y,
 		glyph_draw_translate_x, glyph_draw_translate_y
 	);
@@ -1047,25 +1117,108 @@ void ve_fontcache_shape_text_uncached( ve_fontcache* cache, ve_font_id font, ve_
 	STBTT_assert( cache );
 	STBTT_assert( font >= 0 && font < cache->entry.size() );
 
+	bool use_full_text_shape = cache->text_shape_advanced;
 	ve_fontcache_entry& entry = cache->entry[ font ];
-	output.codepoints.clear();
+	output.glyphs.clear();
 	output.pos.clear();
 
+	int ascent = 0, descent = 0, line_gap = 0;
+	stbtt_GetFontVMetrics( &entry.info, &ascent, &descent, &line_gap );
+
 #ifdef VE_FONTCACHE_HARFBUZZ
-	// Use HarfBuzz for text shaping. Yay! This is good.
+	if ( use_full_text_shape ) {
+		
+		// Use HarfBuzz for text shaping. Yay! This is good.
+		hb_script_t current_script = HB_SCRIPT_UNKNOWN;
+		hb_unicode_funcs_t* hb_ucfunc = hb_unicode_funcs_get_default();
+		hb_buffer_clear_contents( cache->hb_text_buffer );
+		STBTT_assert( entry.hb_font );
+
+		// Lambda to shape a run using HarfBuzz library.
+		float pos = 0.0f, vpos = 0.0f;
+		auto ve_fontcache_shape_hb_run = [&]( hb_buffer_t * buf, hb_script_t script )
+		{
+			// Set script and direction. We use the system's default language.
+			//script = HB_SCRIPT_LATIN;
+			hb_buffer_set_script( buf, script );
+			hb_buffer_set_direction( buf, hb_script_get_horizontal_direction( script ) );
+			hb_buffer_set_language( buf, hb_language_get_default() );
+		
+			// Perform the actual shaping of this run using HarfBuzz.
+			hb_shape( entry.hb_font, buf, nullptr, 0 );
+
+			// Loop over glyphs and append to output buffer.
+			unsigned int glyph_count;
+			hb_glyph_info_t *glyph_info = hb_buffer_get_glyph_infos( buf, &glyph_count );
+			hb_glyph_position_t *glyph_pos = hb_buffer_get_glyph_positions( buf, &glyph_count );
+
+			for ( int i = 0; i < glyph_count; i++ ) {
+				ve_glyph glyph_id = ( ve_glyph ) glyph_info[i].codepoint;
+				if ( glyph_info[i].cluster ) {
+					pos = 0.0f;
+					vpos -= ( ascent - descent + line_gap ) * entry.size_scale;
+					vpos = ( int ) ( vpos + 0.5f );
+					continue;
+				}
+				if ( std::abs( entry.size ) <= VE_FONTCACHE_ADVANCE_SNAP_SMALLFONT_SIZE ) {
+					// Expand advance to closest pixel for hb_font small sizes.
+					pos = std::ceilf( pos );
+				}
+				
+				output.glyphs.push_back( glyph_id );
+				float offset_x = glyph_pos[i].x_offset * entry.size_scale, offset_y = glyph_pos[i].y_offset * entry.size_scale;
+				output.pos.push_back( ve_fontcache_make_vec2( int( pos + offset_x + 0.5 ), vpos + offset_y ) );
+				
+				pos += glyph_pos[i].x_advance * entry.size_scale;
+				vpos += glyph_pos[i].y_advance * entry.size_scale;
+			}
+
+			output.end_cursor_pos.x = pos;
+			output.end_cursor_pos.y = vpos;
+			hb_buffer_clear_contents( buf );
+		};
+
+		// We first start with simple bidi and run logic.
+		// True CTL is pretty hard and we don't fully support that; patches welcome!
+
+		void* v = nullptr;
+		utf8_int32_t codepoint;
+		size_t u32_length = utf8len( text_utf8.data() );
+		for ( v = utf8codepoint( text_utf8.data(), &codepoint ); codepoint; v = utf8codepoint( v, &codepoint ) ) {
+			hb_script_t script = hb_unicode_script( hb_ucfunc, ( hb_codepoint_t ) codepoint );
+		
+			// Can we continue the current run?
+			bool special_script = ( script == HB_SCRIPT_UNKNOWN || script == HB_SCRIPT_INHERITED || script == HB_SCRIPT_COMMON );
+			if ( special_script || script == current_script ) {
+				hb_buffer_add( cache->hb_text_buffer, ( hb_codepoint_t ) codepoint, codepoint == '\n' ? 1 : 0 );
+				current_script = special_script ? current_script : script;
+				continue;
+			}
+		
+			// End current run since we've encountered a script change.
+			ve_fontcache_shape_hb_run( cache->hb_text_buffer, current_script );
+			hb_buffer_add( cache->hb_text_buffer, ( hb_codepoint_t ) codepoint, codepoint == '\n' ? 1 : 0 );
+			current_script = script;
+		}
+
+		// End the last run if needed.
+		ve_fontcache_shape_hb_run( cache->hb_text_buffer, current_script );
+		return;
+	}
 #else // VE_FONTCACHE_HARFBUZZ
-	// No HarfBuzz. We use our own fallback dumbass text shaping.
-	// WARNING: PLEASE DO NOT RUN THIS PATH IN PROD. GOOD TEXT SHAPING IS IMPORTANT FOR INTERNATIONALISATION.
+	cache->text_shape_advanced = false;
+#endif // VE_FONTCACHE_HARFBUZZ
+
+	// We use our own fallback dumbass text shaping.
+	// WARNING: PLEASE USE HARFBUZZ. GOOD TEXT SHAPING IS IMPORTANT FOR INTERNATIONALISATION.
 	
 	utf8_int32_t codepoint, prev_codepoint = 0;
 	size_t u32_length = utf8len( text_utf8.data() );
-	output.codepoints.reserve( u32_length );
+	output.glyphs.reserve( u32_length );
 	output.pos.reserve( u32_length );
 
 	float pos = 0.0f, vpos = 0.0f;
 	int advance = 0, to_left_side_glyph = 0;
-	int ascent = 0, descent = 0, line_gap = 0;
-	stbtt_GetFontVMetrics( &entry.info, &ascent, &descent, &line_gap ); // TODO: handle this correctly!!.
 
 	// Loop through text and shape.
 	for ( void* v = utf8codepoint( text_utf8.data(), &codepoint ); codepoint; v = utf8codepoint( v, &codepoint ) ) {
@@ -1080,12 +1233,12 @@ void ve_fontcache_shape_text_uncached( ve_fontcache* cache, ve_font_id font, ve_
 			prev_codepoint = 0;
 			continue;
 		}
-		if ( std::abs( entry.size ) <= 12 ) {
-			// Expand advance to closest pixel for font small sizes.
+		if ( std::abs( entry.size ) <= VE_FONTCACHE_ADVANCE_SNAP_SMALLFONT_SIZE ) {
+			// Expand advance to closest pixel for hb_font small sizes.
 			pos = std::ceilf( pos );
 		}
 
-		output.codepoints.push_back( ( ve_codepoint ) codepoint );
+		output.glyphs.push_back( stbtt_FindGlyphIndex( &entry.info, codepoint ) );
 		stbtt_GetCodepointHMetrics( &entry.info, codepoint, &advance, &to_left_side_glyph );
 		output.pos.push_back( ve_fontcache_make_vec2( int( pos + 0.5 ), vpos ) );
 		
@@ -1094,7 +1247,9 @@ void ve_fontcache_shape_text_uncached( ve_fontcache* cache, ve_font_id font, ve_
 		pos += adv;
 		prev_codepoint = codepoint;
 	}
-#endif // VE_FONTCACHE_HARFBUZZ
+
+	output.end_cursor_pos.x = pos;
+	output.end_cursor_pos.y = vpos;
 }
 
 template < typename T >
@@ -1131,13 +1286,13 @@ static ve_fontcache_shaped_text& ve_fontcache_shape_text_cached( ve_fontcache* c
 			STBTT_assert( shape_cache_idx != -1 );
 			ve_fontcache_LRU_put( state, hash, shape_cache_idx );
 		}
+		ve_fontcache_shape_text_uncached( cache, font, cache->shape_cache.storage[ shape_cache_idx ], text_utf8 );
 	}
 
-	ve_fontcache_shape_text_uncached( cache, font, cache->shape_cache.storage[ shape_cache_idx ], text_utf8 );
 	return cache->shape_cache.storage[ shape_cache_idx ];
 }
 
-static void ve_fontcache_directly_draw_massive_glyph( ve_fontcache* cache, ve_fontcache_entry& entry, ve_codepoint unicode, int bounds_x0, int bounds_y0, int bounds_width, int bounds_height,
+static void ve_fontcache_directly_draw_massive_glyph( ve_fontcache* cache, ve_fontcache_entry& entry, ve_glyph glyph, int bounds_x0, int bounds_y0, int bounds_width, int bounds_height,
 	float oversample_x = 1.0f, float oversample_y = 1.0f, float posx = 0.0f, float posy = 0.0f, float scalex = 1.0f, float scaley = 1.0f )
 {
 	// Flush out whatever was in the glyph buffer beforehand to atlas.
@@ -1152,7 +1307,7 @@ static void ve_fontcache_directly_draw_massive_glyph( ve_fontcache* cache, ve_fo
 
 	// Render glyph to glyph_update_FBO.
 	ve_fontcache_cache_glyph(
-		cache, entry.font_id, unicode,
+		cache, entry.font_id, glyph,
 		glyph_draw_scale_x, glyph_draw_scale_y,
 		glyph_draw_translate_x, glyph_draw_translate_y
 	);
@@ -1188,11 +1343,10 @@ static void ve_fontcache_directly_draw_massive_glyph( ve_fontcache* cache, ve_fo
 	cache->drawlist.dcalls.push_back( dcall );
 }
 
-static bool ve_fontcache_empty( ve_fontcache* cache, ve_fontcache_entry& entry, ve_codepoint unicode )
+static bool ve_fontcache_empty( ve_fontcache* cache, ve_fontcache_entry& entry, ve_glyph glyph_index )
 {
-	int glyph_index = stbtt_FindGlyphIndex( &entry.info, ( int ) unicode );
 	if ( !glyph_index ) {
-		// Glyph not in current font.
+		// Glyph not in current hb_font.
 		return true;
 	}
 	if ( stbtt_IsGlyphEmpty( &entry.info, glyph_index ) )
@@ -1201,17 +1355,16 @@ static bool ve_fontcache_empty( ve_fontcache* cache, ve_fontcache_entry& entry, 
 }
 
 // This function only draws codepoints that have been drawn. Returns false without drawing anything if uncached.
-bool ve_fontcache_draw_cached_codepoint( ve_fontcache* cache, ve_fontcache_entry& entry, ve_codepoint unicode, float posx = 0.0f, float posy = 0.0f, float scalex = 1.0f, float scaley = 1.0f )
+bool ve_fontcache_draw_cached_glyph( ve_fontcache* cache, ve_fontcache_entry& entry, ve_glyph glyph_index, float posx = 0.0f, float posy = 0.0f, float scalex = 1.0f, float scaley = 1.0f )
 {
-	int glyph_index = stbtt_FindGlyphIndex( &entry.info, ( int ) unicode );
 	if ( !glyph_index ) {
-		// Glyph not in current font.
+		// Glyph not in current hb_font.
 		return true;
 	}
 	if ( stbtt_IsGlyphEmpty( &entry.info, glyph_index ) )
 		return true;
 
-	// Get font text metrics. These are unscaled!
+	// Get hb_font text metrics. These are unscaled!
 	int bounds_x0, bounds_x1, bounds_y0, bounds_y1;
 	int success = stbtt_GetGlyphBox( &entry.info, glyph_index, &bounds_x0, &bounds_y0, &bounds_x1, &bounds_y1 );
 	int bounds_width = bounds_x1 - bounds_x0, bounds_height = bounds_y1 - bounds_y0;
@@ -1224,12 +1377,17 @@ bool ve_fontcache_draw_cached_codepoint( ve_fontcache* cache, ve_fontcache_entry
 
 	// E region is special case and not cached to atlas.
 	if ( region == 'E' ) {
-		ve_fontcache_directly_draw_massive_glyph( cache, entry, unicode, bounds_x0, bounds_y0, bounds_width, bounds_height, oversample_x, oversample_y, posx, posy, scalex, scaley );
+		ve_fontcache_directly_draw_massive_glyph(
+			cache, entry, glyph_index,
+			bounds_x0, bounds_y0, bounds_width, bounds_height,
+			oversample_x, oversample_y,
+			posx, posy, scalex, scaley
+		);
 		return true;
 	}
 
 	// Is this codepoint cached?
-	uint64_t lru_code = unicode +  ( ( 0x100000000ULL * entry.font_id ) & 0xFFFFFFFF00000000ULL );
+	uint64_t lru_code = glyph_index +  ( ( 0x100000000ULL * entry.font_id ) & 0xFFFFFFFF00000000ULL );
 	int atlas_index = ve_fontcache_LRU_get( *state, lru_code );
 	if( atlas_index == -1 ) {
 		return false;
@@ -1268,13 +1426,13 @@ static void ve_fontcache_reset_batch_codepoint_state( ve_fontcache* cache )
 	cache->temp_codepoint_seen.reserve( 256 );
 }
 
-static bool ve_fontcache_can_batch_codepoint( ve_fontcache* cache, ve_font_id font, ve_fontcache_entry& entry, ve_codepoint unicode )
+static bool ve_fontcache_can_batch_glyph( ve_fontcache* cache, ve_font_id font, ve_fontcache_entry& entry, ve_glyph glyph_index )
 {
 	STBTT_assert( cache );
 	STBTT_assert( entry.font_id == font );
 	
 	// Decide which atlas to target.
-	int glyph_index = stbtt_FindGlyphIndex( &entry.info, ( int ) unicode ); STBTT_assert( glyph_index != -1 );
+	STBTT_assert( glyph_index != -1 );
 	ve_fontcache_LRU* state = nullptr; uint32_t* next_idx = nullptr;
 	float oversample_x = VE_FONTCACHE_GLYPHDRAW_OVERSAMPLE_X, oversample_y = VE_FONTCACHE_GLYPHDRAW_OVERSAMPLE_Y;
 	ve_atlas_region region = ve_fontcache_decide_codepoint_region( cache, entry, glyph_index, state, next_idx, oversample_x, oversample_y );
@@ -1284,7 +1442,7 @@ static bool ve_fontcache_can_batch_codepoint( ve_fontcache* cache, ve_font_id fo
 	if ( cache->temp_codepoint_seen.size() > 1024 ) return false;
 
 	// Is this glyph cached?
-	uint64_t lru_code = unicode +  ( ( 0x100000000ULL * entry.font_id ) & 0xFFFFFFFF00000000ULL );
+	uint64_t lru_code = glyph_index +  ( ( 0x100000000ULL * entry.font_id ) & 0xFFFFFFFF00000000ULL );
 	int atlas_index = ve_fontcache_LRU_get( *state, lru_code );
 	if ( atlas_index == -1 ) {
 		if ( *next_idx >= state->capacity ) {
@@ -1294,7 +1452,7 @@ static bool ve_fontcache_can_batch_codepoint( ve_fontcache* cache, ve_font_id fo
 				return false;
 			}
 		}
-		ve_fontcache_cache_codepoint_to_atlas( cache, font, unicode );
+		ve_fontcache_cache_glyph_to_atlas( cache, font, glyph_index );
 	}
 	
 	STBTT_assert( ve_fontcache_LRU_get( *state, lru_code ) != -1 );
@@ -1308,9 +1466,9 @@ static void ve_fontcache_draw_text_batch( ve_fontcache* cache, ve_fontcache_entr
 {
 	ve_fontcache_flush_glyph_buffer_to_atlas( cache );
 	for( int j = batch_start_idx; j < batch_end_idx; j++ ) {
-		ve_codepoint unicode = shaped.codepoints[j];
+		ve_glyph glyph_index = shaped.glyphs[j];
 		float glyph_translate_x = posx + shaped.pos[j].x * scalex, glyph_translate_y = posy + shaped.pos[j].y * scaley;
-		bool glyph_cached = ve_fontcache_draw_cached_codepoint( cache, entry, unicode, glyph_translate_x, glyph_translate_y, scalex, scaley );
+		bool glyph_cached = ve_fontcache_draw_cached_glyph( cache, entry, glyph_index, glyph_translate_x, glyph_translate_y, scalex, scaley );
 		STBTT_assert( glyph_cached );
 	}
 }
@@ -1327,27 +1485,36 @@ bool ve_fontcache_draw_text( ve_fontcache* cache, ve_font_id font, const std::st
 	ve_fontcache_entry& entry = cache->entry[ font ];
 
 	int batch_start_idx = 0;
-	for( int i = 0; i < shaped.codepoints.size(); i++ ) {
-		ve_codepoint unicode = shaped.codepoints[i];
-		if ( ve_fontcache_empty( cache, entry, unicode ) )
+	for( int i = 0; i < shaped.glyphs.size(); i++ ) {
+		ve_glyph glyph_index = shaped.glyphs[i];
+		if ( ve_fontcache_empty( cache, entry, glyph_index ) )
 			continue;
 
-		if ( ve_fontcache_can_batch_codepoint( cache, font, entry, unicode ) ) {
+		if ( ve_fontcache_can_batch_glyph( cache, font, entry, glyph_index ) ) {
 			continue;
 		}
 
 		ve_fontcache_draw_text_batch( cache, entry, shaped, batch_start_idx, i, posx, posy, scalex, scaley );
 		ve_fontcache_reset_batch_codepoint_state( cache );
 		
-		ve_fontcache_cache_codepoint_to_atlas( cache, font, unicode );
-		uint64_t lru_code = unicode +  ( ( 0x100000000ULL * font ) & 0xFFFFFFFF00000000ULL );
+		ve_fontcache_cache_glyph_to_atlas( cache, font, glyph_index );
+		uint64_t lru_code = glyph_index + ( ( 0x100000000ULL * font ) & 0xFFFFFFFF00000000ULL );
 		cache->temp_codepoint_seen[ lru_code ] = true;
 
 		batch_start_idx = i;
 	}
-	ve_fontcache_draw_text_batch( cache, entry, shaped, batch_start_idx, shaped.codepoints.size(), posx, posy, scalex, scaley );
+
+	ve_fontcache_draw_text_batch( cache, entry, shaped, batch_start_idx, shaped.glyphs.size(), posx, posy, scalex, scaley );
 	ve_fontcache_reset_batch_codepoint_state( cache );
+	cache->cursor_pos.x = posx + shaped.end_cursor_pos.x * scalex;
+	cache->cursor_pos.y = posy + shaped.end_cursor_pos.x * scaley;
+
 	return true;
+}
+
+ve_fontcache_vec2 ve_fontcache_get_cursor_pos( ve_fontcache* cache  )
+{
+	return cache->cursor_pos;
 }
 
 void ve_fontcache_optimise_drawlist( ve_fontcache* cache )
