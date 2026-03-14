@@ -15,9 +15,12 @@
 	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
 	NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
 	NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
-	OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-	CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+   OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+   CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
+
+#include <cmath>
+#include <cstdint>
 
 /*
 ---------------------------------- How to plug into rendering API ----------------------------------------
@@ -384,8 +387,8 @@ typedef uint64_t ve_fontcache_poollist_value;
 
 struct ve_fontcache_poollist_item
 {
-	ve_fontcache_poollist_itr prev = -1;
-	ve_fontcache_poollist_itr next = -1;
+	ve_fontcache_poollist_itr prev = 0xFFFFFFFFU;
+	ve_fontcache_poollist_itr next = 0xFFFFFFFFU;
 	ve_fontcache_poollist_value value = 0;
 };
 
@@ -393,8 +396,8 @@ struct ve_fontcache_poollist
 {
 	std::vector< ve_fontcache_poollist_item > pool;
 	std::vector< ve_fontcache_poollist_itr > freelist;
-	ve_fontcache_poollist_itr front = -1; 
-	ve_fontcache_poollist_itr back = -1;
+	ve_fontcache_poollist_itr front = 0xFFFFFFFFU; 
+	ve_fontcache_poollist_itr back = 0xFFFFFFFFU;
 	size_t size = 0;
 	size_t capacity = 0;
 };
@@ -1456,7 +1459,7 @@ void ve_fontcache_shape_text_uncached( ve_fontcache* cache, ve_font_id font, ve_
 				}
 				if ( std::abs( entry.size ) <= VE_FONTCACHE_ADVANCE_SNAP_SMALLFONT_SIZE ) {
 					// Expand advance to closest pixel for hb_font small sizes.
-					pos = std::ceilf( pos );
+					pos = std::ceil( pos );
 				}
 				
 				output.glyphs.push_back( glyph_id );
@@ -1529,7 +1532,7 @@ void ve_fontcache_shape_text_uncached( ve_fontcache* cache, ve_font_id font, ve_
 		}
 		if ( std::abs( entry.size ) <= VE_FONTCACHE_ADVANCE_SNAP_SMALLFONT_SIZE ) {
 			// Expand advance to closest pixel for hb_font small sizes.
-			pos = std::ceilf( pos );
+			pos = std::ceil( pos );
 		}
 
 		output.glyphs.push_back( stbtt_FindGlyphIndex( &entry.info, codepoint ) );
