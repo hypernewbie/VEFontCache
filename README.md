@@ -85,6 +85,31 @@ Except HarfBuzz, that's all the required dependencies. That said it's strongly r
 to use HarfBuzz ( TODO: HarfBuzz not supported yet, coming soon!! ) over the default utf8.h latin
 fallback text shaper.
 
+## CMake build and tests
+
+The repository now builds from the root `CMakeLists.txt`.
+
+Key options:
+```
+VEFC_BUILD_DEMO=ON|OFF
+VEFC_BUILD_TESTS=ON|OFF
+VEFC_ENABLE_HARFBUZZ=ON|OFF
+VEFC_ENABLE_FREETYPE=ON|OFF
+```
+
+Windows `clang-cl` + Ninja example:
+```bat
+:: Run from a VS Developer Command Prompt or after VsDevCmd.bat
+cmake -S . -B build -G Ninja ^
+  -DCMAKE_C_COMPILER=clang-cl ^
+  -DCMAKE_CXX_COMPILER=clang-cl ^
+  -DVEFC_BUILD_TESTS=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The test executables run with `demo/` as their working directory so the bundled fonts resolve without extra setup.
+
 ## Integration with rendering backend
 
 VEFontCache is largely backend agnostic. Currently the demo project uses OpenGL 3.3 for Windows.

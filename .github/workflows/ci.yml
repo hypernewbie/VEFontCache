@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  windows-msvc:
+    name: Windows MSVC (${{ matrix.harfbuzz }}, ${{ matrix.freetype }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        harfbuzz: [ON, OFF]
+        freetype: [ON, OFF]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DVEFC_BUILD_DEMO=OFF
+          -DVEFC_BUILD_TESTS=ON
+          -DVEFC_ENABLE_HARFBUZZ=${{ matrix.harfbuzz }}
+          -DVEFC_ENABLE_FREETYPE=${{ matrix.freetype }}
+      - name: Build
+        shell: pwsh
+        run: cmake --build build
+      - name: Test
+        shell: pwsh
+        run: ctest --test-dir build --output-on-failure
+
+  windows-clangcl:
+    name: Windows clang-cl (${{ matrix.harfbuzz }}, ${{ matrix.freetype }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        harfbuzz: [ON, OFF]
+        freetype: [ON, OFF]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Ensure toolchain
+        shell: pwsh
+        run: |
+          if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
+            winget install --id LLVM.LLVM --silent --accept-package-agreements --accept-source-agreements
+            Add-Content -Path $env:GITHUB_PATH -Value "${env:ProgramFiles}\LLVM\bin"
+          }
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            winget install --id Ninja-build.Ninja --silent --accept-package-agreements --accept-source-agreements
+            Add-Content -Path $env:GITHUB_PATH -Value "${env:ProgramFiles}\Ninja"
+          }
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_C_COMPILER=clang-cl
+          -DCMAKE_CXX_COMPILER=clang-cl
+          -DVEFC_BUILD_DEMO=OFF
+          -DVEFC_BUILD_TESTS=ON
+          -DVEFC_ENABLE_HARFBUZZ=${{ matrix.harfbuzz }}
+          -DVEFC_ENABLE_FREETYPE=${{ matrix.freetype }}
+      - name: Build
+        shell: pwsh
+        run: cmake --build build
+      - name: Test
+        shell: pwsh
+        run: ctest --test-dir build --output-on-failure
+
+  ubuntu-clang:
+    name: Ubuntu clang (${{ matrix.harfbuzz }}, ${{ matrix.freetype }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        harfbuzz: [ON, OFF]
+        freetype: [ON, OFF]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure Ninja
+        run: |
+          command -v ninja >/dev/null 2>&1 || sudo apt-get update
+          command -v ninja >/dev/null 2>&1 || sudo apt-get install -y ninja-build
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_CXX_COMPILER=clang++
+          -DVEFC_BUILD_DEMO=OFF
+          -DVEFC_BUILD_TESTS=ON
+          -DVEFC_ENABLE_HARFBUZZ=${{ matrix.harfbuzz }}
+          -DVEFC_ENABLE_FREETYPE=${{ matrix.freetype }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  macos-clang:
+    name: macOS clang (${{ matrix.harfbuzz }}, ${{ matrix.freetype }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        harfbuzz: [ON, OFF]
+        freetype: [ON, OFF]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure Ninja
+        run: |
+          command -v ninja >/dev/null 2>&1 || brew install ninja
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_CXX_COMPILER=clang++
+          -DVEFC_BUILD_DEMO=OFF
+          -DVEFC_BUILD_TESTS=ON
+          -DVEFC_ENABLE_HARFBUZZ=${{ matrix.harfbuzz }}
+          -DVEFC_ENABLE_FREETYPE=${{ matrix.freetype }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
