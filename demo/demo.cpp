@@ -36,18 +36,15 @@
 #include <gl/glu.h>
 #include "TinyWindow.h"
 
-#define VE_FONTCACHE_FREETYPE_RASTERISATION
 #ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
 	#include <ft2build.h>
 	#include FT_FREETYPE_H
     #include FT_GLYPH_H
 #endif // VE_FONTCACHE_FREETYPE_RASTERISATION
 
-#define DEMO_HARFBUZZ
-#ifdef DEMO_HARFBUZZ
-	#define VE_FONTCACHE_HARFBUZZ
+#ifdef VE_FONTCACHE_HARFBUZZ
     #include <hb.h>
-#endif // DEMO_HARFBUZZ
+#endif // VE_FONTCACHE_HARFBUZZ
 
 #define VE_FONTCACHE_IMPL
 // #define VE_FONTCACHE_DEBUGPRINT
