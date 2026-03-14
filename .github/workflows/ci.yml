@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - ai_slop
   pull_request:
 
 jobs:
