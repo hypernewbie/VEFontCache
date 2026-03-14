@@ -31,6 +31,10 @@
 #include <memory>
 #include <array>
 #include <chrono>
+#include <cmath>
+#include <cstring>
+#include <filesystem>
+#include <string>
 #include <glad/glad.h>
 #include <glad/glad.c>
 #include <gl/glu.h>
@@ -49,6 +53,7 @@
 #define VE_FONTCACHE_IMPL
 // #define VE_FONTCACHE_DEBUGPRINT
 #include "../ve_fontcache.h"
+#include "../ve_fontcache_backend_test.h"
 
 static ve_fontcache cache;
 
@@ -62,6 +67,42 @@ static GLuint fontcache_fbo_texture[ 2 ];
 static std::vector< GLuint > fonecache_CPU_atlas_textures; // Used with VE_FONTCACHE_FREETYPE_RASTERISATION
 TinyWindow::vec2_t< unsigned int > window_size;
 static int mouse_scroll = 0;
+
+static std::filesystem::path current_executable_directory()
+{
+	std::array< char, MAX_PATH > path {};
+	DWORD length = GetModuleFileNameA( nullptr, path.data(), static_cast< DWORD >( path.size() ) );
+	return std::filesystem::path( std::string( path.data(), length ) ).parent_path();
+}
+
+static std::string resolve_demo_asset_path( const char* relative_path )
+{
+	const std::filesystem::path relative( relative_path );
+	const std::filesystem::path cwd = std::filesystem::current_path();
+	const std::filesystem::path exe_dir = current_executable_directory();
+	const std::array< std::filesystem::path, 6 > candidates = {
+		cwd / relative,
+		cwd / "demo" / relative,
+		cwd / ".." / "demo" / relative,
+		exe_dir / relative,
+		exe_dir / ".." / "demo" / relative,
+		exe_dir / ".." / ".." / "demo" / relative,
+	};
+
+	for ( const std::filesystem::path& candidate : candidates ) {
+		if ( std::filesystem::exists( candidate ) ) {
+			return candidate.lexically_normal().string();
+		}
+	}
+
+	return relative.string();
+}
+
+static ve_font_id load_demo_font( ve_fontcache* target_cache, const char* relative_path, std::vector< uint8_t >& buffer, float size_px )
+{
+	std::string resolved_path = resolve_demo_asset_path( relative_path );
+	return ve_fontcache_loadfile( target_cache, resolved_path.c_str(), buffer, size_px );
+}
 
 const std::string vs_source_shared = R"(
 #version 330 core
@@ -422,27 +463,27 @@ void init_demo()
 	static std::vector< uint8_t > buffer, buffer2, buffer3, buffer4, buffer5, buffer6,
 		buffer7, buffer8, buffer9, buffer10, buffer11, buffer12, buffer13, buffer14;
 
-	logo_font = ve_fontcache_loadfile( &cache, "fonts/SawarabiMincho-Regular.ttf", buffer, 330.0f );
-	title_font = ve_fontcache_loadfile( &cache, "fonts/OpenSans-Regular.ttf", buffer2, 42.0f );
-	print_font = ve_fontcache_loadfile( &cache, "fonts/NotoSansJP-Light.otf", buffer3, 19.0f );
-	mono_font = ve_fontcache_loadfile( &cache, "fonts/UbuntuMono-Regular.ttf", buffer4, 21.0f );
-	small_font = ve_fontcache_loadfile( &cache, "fonts/Roboto-Regular.ttf", buffer14, 10.0f );
+	logo_font = load_demo_font( &cache, "fonts/SawarabiMincho-Regular.ttf", buffer, 330.0f );
+	title_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", buffer2, 42.0f );
+	print_font = load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", buffer3, 19.0f );
+	mono_font = load_demo_font( &cache, "fonts/UbuntuMono-Regular.ttf", buffer4, 21.0f );
+	small_font = load_demo_font( &cache, "fonts/Roboto-Regular.ttf", buffer14, 10.0f );
 
-	demo_sans_font = ve_fontcache_loadfile( &cache, "fonts/OpenSans-Regular.ttf", buffer2, 18.0f );
-	demo_serif_font = ve_fontcache_loadfile( &cache, "fonts/Bitter-Regular.ttf", buffer5, 18.0f );
-	demo_script_font = ve_fontcache_loadfile( &cache, "fonts/DancingScript-Regular.ttf", buffer6, 22.0f );
-	demo_mono_font = ve_fontcache_loadfile( &cache, "fonts/NovaMono-Regular.ttf", buffer7, 18.0f );
+	demo_sans_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", buffer2, 18.0f );
+	demo_serif_font = load_demo_font( &cache, "fonts/Bitter-Regular.ttf", buffer5, 18.0f );
+	demo_script_font = load_demo_font( &cache, "fonts/DancingScript-Regular.ttf", buffer6, 22.0f );
+	demo_mono_font = load_demo_font( &cache, "fonts/NovaMono-Regular.ttf", buffer7, 18.0f );
 
-	demo_chinese_font = ve_fontcache_loadfile( &cache, "fonts/NotoSerifSC-Regular.otf", buffer8, 24.0f );
-	demo_japanese_font = ve_fontcache_loadfile( &cache, "fonts/SawarabiMincho-Regular.ttf", buffer, 24.0f );
-	demo_korean_font = ve_fontcache_loadfile( &cache, "fonts/NanumPenScript-Regular.ttf", buffer9, 36.0f );
-	demo_thai_font = ve_fontcache_loadfile( &cache, "fonts/Krub-Regular.ttf", buffer10, 24.0f );
-	demo_arabic_font = ve_fontcache_loadfile( &cache, "fonts/Tajawal-Regular.ttf", buffer11, 24.0f );
-	demo_hebrew_font = ve_fontcache_loadfile( &cache, "fonts/DavidLibre-Regular.ttf", buffer12, 22.0f );
+	demo_chinese_font = load_demo_font( &cache, "fonts/NotoSerifSC-Regular.otf", buffer8, 24.0f );
+	demo_japanese_font = load_demo_font( &cache, "fonts/SawarabiMincho-Regular.ttf", buffer, 24.0f );
+	demo_korean_font = load_demo_font( &cache, "fonts/NanumPenScript-Regular.ttf", buffer9, 36.0f );
+	demo_thai_font = load_demo_font( &cache, "fonts/Krub-Regular.ttf", buffer10, 24.0f );
+	demo_arabic_font = load_demo_font( &cache, "fonts/Tajawal-Regular.ttf", buffer11, 24.0f );
+	demo_hebrew_font = load_demo_font( &cache, "fonts/DavidLibre-Regular.ttf", buffer12, 22.0f );
 
-	demo_raincode_font = ve_fontcache_loadfile( &cache, "fonts/NotoSansJP-Regular.otf", buffer13, 20.0f );
-	demo_grid2_font = ve_fontcache_loadfile( &cache, "fonts/NotoSerifSC-Regular.otf", buffer8, 54.0f );
-	demo_grid3_font = ve_fontcache_loadfile( &cache, "fonts/Bitter-Regular.ttf", buffer5, 44.0f );
+	demo_raincode_font = load_demo_font( &cache, "fonts/NotoSansJP-Regular.otf", buffer13, 20.0f );
+	demo_grid2_font = load_demo_font( &cache, "fonts/NotoSerifSC-Regular.otf", buffer8, 54.0f );
+	demo_grid3_font = load_demo_font( &cache, "fonts/Bitter-Regular.ttf", buffer5, 44.0f );
 }
 
 void render_demo( TinyWindow::tWindow* window, float dT )
@@ -777,7 +818,144 @@ void test_plist()
 	}
 }
 
-int main()
+static bool has_flag( int argc, char** argv, const char* flag )
+{
+	for ( int i = 1; i < argc; i++ ) {
+		if ( std::strcmp( argv[ i ], flag ) == 0 ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static void clear_framebuffer_colour( GLuint framebuffer )
+{
+	glBindFramebuffer( GL_FRAMEBUFFER, framebuffer );
+	glDisable( GL_FRAMEBUFFER_SRGB );
+	glViewport(
+		0,
+		0,
+		framebuffer == 0 ? static_cast< GLsizei >( window_size.width ) : ( framebuffer == fontcache_fbo[ 0 ] ? VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH : VE_FONTCACHE_ATLAS_WIDTH ),
+		framebuffer == 0 ? static_cast< GLsizei >( window_size.height ) : ( framebuffer == fontcache_fbo[ 0 ] ? VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT : VE_FONTCACHE_ATLAS_HEIGHT ) );
+	glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
+	glClear( GL_COLOR_BUFFER_BIT );
+}
+
+static void clear_backend_test_surfaces()
+{
+	clear_framebuffer_colour( fontcache_fbo[ 0 ] );
+	clear_framebuffer_colour( fontcache_fbo[ 1 ] );
+	clear_framebuffer_colour( 0 );
+	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+}
+
+static bool backend_test_readback( const char* name, int x, int y, int w, int h, uint8_t* out_pixels )
+{
+	GLint previous_read_framebuffer = 0;
+	glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &previous_read_framebuffer );
+	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
+
+	if ( std::strcmp( name, "glyph_buffer" ) == 0 ) {
+		glBindFramebuffer( GL_READ_FRAMEBUFFER, fontcache_fbo[ 0 ] );
+		glReadBuffer( GL_COLOR_ATTACHMENT0 );
+		glReadPixels( x, y, w, h, GL_RED, GL_UNSIGNED_BYTE, out_pixels );
+	} else if ( std::strcmp( name, "atlas" ) == 0 ) {
+		glBindFramebuffer( GL_READ_FRAMEBUFFER, fontcache_fbo[ 1 ] );
+		glReadBuffer( GL_COLOR_ATTACHMENT0 );
+		glReadPixels( x, y, w, h, GL_RED, GL_UNSIGNED_BYTE, out_pixels );
+	} else if ( std::strcmp( name, "target" ) == 0 ) {
+		glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
+		glReadBuffer( GL_BACK );
+		glReadPixels( x, y, w, h, GL_RED, GL_UNSIGNED_BYTE, out_pixels );
+	} else {
+		glBindFramebuffer( GL_READ_FRAMEBUFFER, previous_read_framebuffer );
+		return false;
+	}
+
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, previous_read_framebuffer );
+	check_error( __LINE__ );
+	return true;
+}
+
+static void backend_test_execute()
+{
+	clear_framebuffer_colour( 0 );
+	fontcache_drawcmd();
+	glFinish();
+}
+
+static int run_backend_test_mode()
+{
+	ve_fontcache_init( &cache, false );
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+	cache.use_freetype = false;
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
+	ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
+
+	std::vector< uint8_t > primary_buffer;
+	std::vector< uint8_t > secondary_buffer;
+	std::vector< uint8_t > small_buffer;
+	std::vector< uint8_t > latin_buffer;
+	std::vector< uint8_t > cjk_buffer;
+	std::vector< uint8_t > huge_buffer;
+	std::vector< std::vector< uint8_t > > reload_buffers;
+
+	ve_font_id primary_font = load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", primary_buffer, 19.0f );
+	ve_font_id secondary_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", secondary_buffer, 48.0f );
+	ve_font_id small_test_font = load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", small_buffer, 10.0f );
+	ve_font_id latin_test_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", latin_buffer, 42.0f );
+	ve_font_id cjk_test_font = load_demo_font( &cache, "fonts/NotoSerifSC-Regular.otf", cjk_buffer, 54.0f );
+	ve_font_id huge_test_font = load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", huge_buffer, 200.0f );
+
+	const bool fonts_ready =
+		primary_font >= 0
+		&& secondary_font >= 0
+		&& small_test_font >= 0
+		&& latin_test_font >= 0
+		&& cjk_test_font >= 0
+		&& huge_test_font >= 0;
+	if ( !fonts_ready ) {
+		printf( "VEFontCache backend tests failed to load one or more demo fonts.\n" );
+		ve_fontcache_shutdown( &cache );
+		return 1;
+	}
+
+	clear_backend_test_surfaces();
+
+	ve_fontcache_backend_test_options options;
+	options.cache = &cache;
+	options.font = primary_font;
+	options.secondary_font = secondary_font;
+	options.small_font = small_test_font;
+	options.latin_font = latin_test_font;
+	options.cjk_font = cjk_test_font;
+	options.huge_font = huge_test_font;
+	options.execute = backend_test_execute;
+	options.readback = backend_test_readback;
+	options.reload_font = [ &reload_buffers ]() -> ve_font_id {
+		reload_buffers.emplace_back();
+		return load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", reload_buffers.back(), 19.0f );
+	};
+
+	ve_fontcache_backend_test_result result = ve_fontcache_backend_test_run( options );
+	printf(
+		"VEFontCache backend tests: %d passed, %d failed, %d skipped\n",
+		result.passed,
+		result.failed,
+		result.skipped );
+	for ( const std::string& failure : result.failures ) {
+		printf( "FAIL: %s\n", failure.c_str() );
+	}
+	for ( const std::string& skipped : result.skipped_tests ) {
+		printf( "SKIP: %s\n", skipped.c_str() );
+	}
+
+	ve_fontcache_shutdown( &cache );
+	return result.failed == 0 ? 0 : 1;
+}
+
+int main( int argc, char** argv )
 {
 	TinyWindow::windowSetting_t cfg;
 	cfg.name = "VEFontCache"; cfg.versionMajor = 3; cfg.versionMinor = 3; cfg.enableSRGB = false;
@@ -814,6 +992,13 @@ int main()
 		printf( "ve_fontcache_cache_glyph() benchmark: total %lf ms for %d glyphs, per-glyph %lf ms\n", elapsed.count(), numGlyphs, elapsed.count() / numGlyphs );
 	}
 #endif // VE_FONTCACHE_DEBUGPRINT
+
+	if ( has_flag( argc, argv, "--test" ) ) {
+		int exit_code = run_backend_test_mode();
+		manager->ShutDown();
+		window.reset( nullptr );
+		return exit_code;
+	}
 
 	init_demo();
 	while( !window->shouldClose ) {

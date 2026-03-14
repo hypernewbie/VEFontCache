@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.21)
 
 project(VEFontCache LANGUAGES C CXX)
 
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
@@ -84,7 +86,12 @@ if(VEFC_BUILD_DEMO)
         ${CMAKE_CURRENT_SOURCE_DIR}/demo/include
         ${CMAKE_CURRENT_SOURCE_DIR}/demo/src
     )
-    target_link_libraries(demo PRIVATE glu32)
+    target_link_libraries(demo PRIVATE
+        glu32
+        opengl32
+        winmm
+        xinput
+    )
     vefc_apply_common_options(demo)
     vefc_apply_features(demo ${VEFC_ENABLE_HARFBUZZ} ${VEFC_ENABLE_FREETYPE})
 

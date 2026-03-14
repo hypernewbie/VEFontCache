@@ -576,6 +576,7 @@ ve_fontcache_poollist_value ve_fontcache_poollist_pop_back( ve_fontcache_poollis
 
 // Generic LRU ( Least-Recently-Used ) cache implementation, reused for both atlas and shape cache.
 void ve_fontcache_LRU_init( ve_fontcache_LRU& LRU, int capacity );
+void ve_fontcache_LRU_erase( ve_fontcache_LRU& LRU, uint64_t key );
 int ve_fontcache_LRU_get( ve_fontcache_LRU& LRU, uint64_t key );
 int ve_fontcache_LRU_peek( ve_fontcache_LRU& LRU, uint64_t key );
 uint64_t ve_fontcache_LRU_put( ve_fontcache_LRU& LRU, uint64_t key, int val );
@@ -662,6 +663,48 @@ void ve_fontcache_shutdown( ve_fontcache* cache )
 		ve_fontcache::freetype = nullptr;
 	}
 #endif // VE_FONTCACHE_FREETYPE_RASTERISATION
+}
+
+static bool ve_fontcache_LRU_key_matches_font( uint64_t key, ve_font_id font )
+{
+	return ( key >> 32 ) == static_cast< uint32_t >( font );
+}
+
+static uint32_t ve_fontcache_LRU_find_next_slot( const ve_fontcache_LRU& LRU )
+{
+	if ( LRU.cache.size() >= static_cast< size_t >( LRU.capacity ) ) {
+		return static_cast< uint32_t >( LRU.capacity );
+	}
+
+	std::vector< bool > used( static_cast< size_t >( LRU.capacity ), false );
+	for ( const auto& entry : LRU.cache ) {
+		if ( entry.second.value >= 0 && entry.second.value < LRU.capacity ) {
+			used[ static_cast< size_t >( entry.second.value ) ] = true;
+		}
+	}
+
+	for ( int i = 0; i < LRU.capacity; i++ ) {
+		if ( !used[ static_cast< size_t >( i ) ] ) {
+			return static_cast< uint32_t >( i );
+		}
+	}
+
+	return static_cast< uint32_t >( LRU.capacity );
+}
+
+static void ve_fontcache_invalidate_font_from_LRU( ve_fontcache_LRU& LRU, ve_font_id font, uint32_t& next_idx )
+{
+	for ( auto it = LRU.cache.begin(); it != LRU.cache.end(); ) {
+		if ( !ve_fontcache_LRU_key_matches_font( it->first, font ) ) {
+			++it;
+			continue;
+		}
+
+		ve_fontcache_poollist_erase( LRU.key_queue, it->second.ptr );
+		it = LRU.cache.erase( it );
+	}
+
+	next_idx = ve_fontcache_LRU_find_next_slot( LRU );
 }
 
 ve_font_id ve_fontcache_load( ve_fontcache* cache, const void* data, size_t data_size, float size_px )
@@ -758,7 +801,34 @@ void ve_fontcache_unload( ve_fontcache* cache, ve_font_id font )
 		FT_Done_Face( et.fontface );
 		et.fontface = nullptr;
 	}
+
+	for ( auto& page : cache->atlasCPU.pages ) {
+		if ( !page ) {
+			continue;
+		}
+
+		for ( auto it = page->cache.begin(); it != page->cache.end(); ) {
+			if ( ve_fontcache_LRU_key_matches_font( it->first, font ) ) {
+				it = page->cache.erase( it );
+			} else {
+				++it;
+			}
+		}
+	}
 #endif // VE_FONTCACHE_FREETYPE_RASTERISATION
+
+	ve_fontcache_LRU_init( cache->atlas.stateA, VE_FONTCACHE_ATLAS_REGION_A_CAPACITY );
+	ve_fontcache_LRU_init( cache->atlas.stateB, VE_FONTCACHE_ATLAS_REGION_B_CAPACITY );
+	ve_fontcache_LRU_init( cache->atlas.stateC, VE_FONTCACHE_ATLAS_REGION_C_CAPACITY );
+	ve_fontcache_LRU_init( cache->atlas.stateD, VE_FONTCACHE_ATLAS_REGION_D_CAPACITY );
+	cache->atlas.next_atlas_idx_A = 0;
+	cache->atlas.next_atlas_idx_B = 0;
+	cache->atlas.next_atlas_idx_C = 0;
+	cache->atlas.next_atlas_idx_D = 0;
+
+	cache->shape_cache.state.cache.clear();
+	ve_fontcache_poollist_init( cache->shape_cache.state.key_queue, cache->shape_cache.state.capacity );
+	cache->shape_cache.next_cache_idx = 0;
 }
 
 void ve_fontcache_set_font_size( ve_fontcache* cache, ve_font_id font, float size_px )
@@ -1848,6 +1918,16 @@ static void ve_fontcache_draw_text_batch( ve_fontcache* cache, ve_fontcache_entr
 
 bool ve_fontcache_draw_text( ve_fontcache* cache, ve_font_id font, const std::u8string& text_utf8, float posx, float posy, float scalex, float scaley, bool shape_cache )
 {
+	STBTT_assert( cache );
+	if ( !cache ) {
+		printf( "ve_fontcache_draw_text: cache was null.\n" );
+		return false;
+	}
+	if ( font < 0 || font >= ( ve_font_id ) cache->entry.size() || !cache->entry[ font ].used ) {
+		printf( "ve_fontcache_draw_text: invalid font id %d.\n", font );
+		return false;
+	}
+
     ve_fontcache_shaped_text uncached_shaped;
     if ( !shape_cache ) {
         ve_fontcache_shape_text_uncached( cache, font, uncached_shaped, text_utf8 );
@@ -1857,8 +1937,6 @@ bool ve_fontcache_draw_text( ve_fontcache* cache, ve_font_id font, const std::u8
 	if ( cache->snap_width ) posx = ( ( int ) ( posx * cache->snap_width + 0.5f ) ) / ( float ) cache->snap_width;
 	if ( cache->snap_height ) posy = ( ( int ) ( posy * cache->snap_height + 0.5f ) ) / ( float ) cache->snap_height;
 
-	STBTT_assert( cache );
-	STBTT_assert( font >= 0 && font < ( ve_font_id ) cache->entry.size() );
 	ve_fontcache_entry& entry = cache->entry[ font ];
 
 	int batch_start_idx = 0;
@@ -1897,6 +1975,9 @@ ve_fontcache_vec2 ve_fontcache_get_cursor_pos( ve_fontcache* cache  )
 void ve_fontcache_optimise_drawlist( ve_fontcache* cache )
 {
 	STBTT_assert( cache );
+	if ( cache->drawlist.dcalls.empty() ) {
+		return;
+	}
 
 	int write_idx = 0;
 	for ( int i = 1; i < cache->drawlist.dcalls.size(); i++ ) {
@@ -1944,6 +2025,9 @@ void ve_fontcache_poollist_init( ve_fontcache_poollist& plist, int capacity )
 {
 	plist.pool.resize( capacity );
 	plist.freelist.resize( capacity );
+	plist.front = 0xFFFFFFFFU;
+	plist.back = 0xFFFFFFFFU;
+	plist.size = 0;
 	plist.capacity = capacity;
 	for ( int i = 0; i < capacity; i++ ) plist.freelist[ i ] = i;
 }
@@ -2009,6 +2093,7 @@ void ve_fontcache_LRU_init( ve_fontcache_LRU& LRU, int capacity )
 	// ref: https://leetcode.com/problems/lru-cache/discuss/968703/c%2B%2B
 	//      https://leetcode.com/submissions/detail/436667816/
 	LRU.capacity = capacity;
+	LRU.cache.clear();
 	LRU.cache.reserve( capacity );
 	ve_fontcache_poollist_init( LRU.key_queue, capacity );
 }
@@ -2019,6 +2104,17 @@ void ve_fontcache_LRU_refresh( ve_fontcache_LRU& LRU, uint64_t key )
 	ve_fontcache_poollist_erase( LRU.key_queue, it->second.ptr );
 	ve_fontcache_poollist_push_front( LRU.key_queue, key );
 	it->second.ptr = LRU.key_queue.front;
+}
+
+void ve_fontcache_LRU_erase( ve_fontcache_LRU& LRU, uint64_t key )
+{
+	auto it = LRU.cache.find( key );
+	if ( it == LRU.cache.end() ) {
+		return;
+	}
+
+	ve_fontcache_poollist_erase( LRU.key_queue, it->second.ptr );
+	LRU.cache.erase( it );
 }
 
 int ve_fontcache_LRU_get( ve_fontcache_LRU& LRU, uint64_t key )

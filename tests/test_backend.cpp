@@ -7,6 +7,11 @@ UTEST( backend, conformance_header_passes )
 
 	ASSERT_GE( font, 0 );
 	ve_fontcache_backend_test_result result = ve_fontcache_backend_test_run( &ctx.cache, font );
+	
+	for ( const auto& failure : result.failures ) {
+		printf( "FAILED: %s\n", failure.c_str() );
+	}
+	
 	EXPECT_EQ( 0, result.failed );
 	EXPECT_TRUE( result.passed > 0 );
 }
