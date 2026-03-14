@@ -110,6 +110,21 @@ ctest --test-dir build --output-on-failure
 
 The test executables run with `demo/` as their working directory so the bundled fonts resolve without extra setup.
 
+The OpenGL demo also has a backend validation mode:
+```bat
+cd build
+.\demo.exe --test
+```
+This runs the reusable backend conformance suite, prints pass/fail counts, and returns a non-zero exit code on failure.
+
+On Windows, there is also a DirectX 11 demo target:
+```bat
+cmake --build build --config Release --target vefc_demo_dx11
+.\build\Release\vefc_demo_dx11.exe
+.\build\Release\vefc_demo_dx11.exe --test
+```
+The DX11 demo uses the same demo assets and backend validation flow as the OpenGL demo.
+
 ## Integration with rendering backend
 
 VEFontCache is largely backend agnostic. Currently the demo project uses OpenGL 3.3 for Windows.

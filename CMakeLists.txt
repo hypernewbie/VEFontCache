@@ -87,6 +87,23 @@ if(VEFC_BUILD_DEMO)
     target_link_libraries(demo PRIVATE glu32)
     vefc_apply_common_options(demo)
     vefc_apply_features(demo ${VEFC_ENABLE_HARFBUZZ} ${VEFC_ENABLE_FREETYPE})
+
+    if(WIN32)
+        add_executable(vefc_demo_dx11
+            demo/demo_dx11.cpp
+        )
+        set_target_properties(vefc_demo_dx11 PROPERTIES
+            VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/demo"
+        )
+        target_link_libraries(vefc_demo_dx11 PRIVATE
+            d3d11
+            d3dcompiler
+            dxgi
+            user32
+        )
+        vefc_apply_common_options(vefc_demo_dx11)
+        vefc_apply_features(vefc_demo_dx11 ${VEFC_ENABLE_HARFBUZZ} ${VEFC_ENABLE_FREETYPE})
+    endif()
 endif()
 
 if(VEFC_BUILD_TESTS)
