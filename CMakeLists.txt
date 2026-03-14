@@ -89,7 +89,39 @@ if(VEFC_BUILD_DEMO)
     vefc_apply_features(demo ${VEFC_ENABLE_HARFBUZZ} ${VEFC_ENABLE_FREETYPE})
 endif()
 
-if(VEFC_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_main.cpp")
+if(VEFC_BUILD_TESTS)
     enable_testing()
-    add_subdirectory(tests EXCLUDE_FROM_ALL)
+
+    set(VEFC_TEST_SOURCES
+        tests/test_main.cpp
+    )
+
+    function(vefc_add_test_target target use_harfbuzz use_freetype)
+        add_executable(${target} ${VEFC_TEST_SOURCES})
+        set_target_properties(${target} PROPERTIES
+            VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/demo"
+        )
+        target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+        vefc_apply_common_options(${target})
+        vefc_apply_features(${target} ${use_harfbuzz} ${use_freetype})
+        add_test(
+            NAME ${target}
+            COMMAND ${target}
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/demo"
+        )
+    endfunction()
+
+    vefc_add_test_target(vefc_tests_base OFF OFF)
+
+    if(VEFC_ENABLE_HARFBUZZ)
+        vefc_add_test_target(vefc_tests_hb ON OFF)
+    endif()
+
+    if(VEFC_ENABLE_FREETYPE)
+        vefc_add_test_target(vefc_tests_ft OFF ON)
+    endif()
+
+    if(VEFC_ENABLE_HARFBUZZ AND VEFC_ENABLE_FREETYPE)
+        vefc_add_test_target(vefc_tests_hb_ft ON ON)
+    endif()
 endif()
