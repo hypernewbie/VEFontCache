@@ -32,6 +32,7 @@
 #include "test_font_load.cpp"
 #include "test_drawlist.cpp"
 #include "test_backend.cpp"
+#include "test_backend_diagnostics.cpp"
 #include "test_shape_cache.cpp"
 #include "test_utf8.cpp"
 #include "test_stress.cpp"

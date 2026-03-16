@@ -850,6 +850,48 @@ static void clear_backend_test_surfaces()
 	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
 }
 
+static void backend_test_reset_surfaces()
+{
+	clear_backend_test_surfaces();
+	glFinish();
+}
+
+static bool backend_test_write_surface( const char* name, int x, int y, int w, int h, const uint8_t* pixels )
+{
+	if ( !name || !pixels || x < 0 || y < 0 || w <= 0 || h <= 0 ) {
+		return false;
+	}
+
+	GLuint texture = 0;
+	int texture_width = 0;
+	int texture_height = 0;
+	if ( std::strcmp( name, "glyph_buffer" ) == 0 ) {
+		texture = fontcache_fbo_texture[ 0 ];
+		texture_width = VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH;
+		texture_height = VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT;
+	} else if ( std::strcmp( name, "atlas" ) == 0 ) {
+		texture = fontcache_fbo_texture[ 1 ];
+		texture_width = VE_FONTCACHE_ATLAS_WIDTH;
+		texture_height = VE_FONTCACHE_ATLAS_HEIGHT;
+	} else {
+		return false;
+	}
+
+	if ( x + w > texture_width || y + h > texture_height ) {
+		return false;
+	}
+
+	GLint previous_texture = 0;
+	glGetIntegerv( GL_TEXTURE_BINDING_2D, &previous_texture );
+	glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+	glBindTexture( GL_TEXTURE_2D, texture );
+	glTexSubImage2D( GL_TEXTURE_2D, 0, x, y, w, h, GL_RED, GL_UNSIGNED_BYTE, pixels );
+	glBindTexture( GL_TEXTURE_2D, static_cast< GLuint >( previous_texture ) );
+	glFinish();
+	check_error( __LINE__ );
+	return true;
+}
+
 static bool backend_test_readback( const char* name, int x, int y, int w, int h, uint8_t* out_pixels )
 {
 	GLint previous_read_framebuffer = 0;
@@ -933,6 +975,8 @@ static int run_backend_test_mode()
 	options.huge_font = huge_test_font;
 	options.execute = backend_test_execute;
 	options.readback = backend_test_readback;
+	options.reset_surfaces = backend_test_reset_surfaces;
+	options.write_surface = backend_test_write_surface;
 	options.reload_font = [ &reload_buffers ]() -> ve_font_id {
 		reload_buffers.emplace_back();
 		return load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", reload_buffers.back(), 19.0f );

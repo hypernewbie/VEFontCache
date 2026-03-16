@@ -560,12 +560,12 @@ DX_CHECK( g_context->Map( staging, 0, D3D11_MAP_READ, 0, &mapped ) );
 if ( source_desc.Format == DXGI_FORMAT_R8_UNORM ) {
 for ( int row = 0; row < h; row++ ) {
 const uint8_t* src = static_cast< const uint8_t* >( mapped.pData ) + row * mapped.RowPitch;
-std::memcpy( out_pixels + row * w, src, static_cast< size_t >( w ) );
+std::memcpy( out_pixels + static_cast< size_t >( h - 1 - row ) * w, src, static_cast< size_t >( w ) );
 }
 } else if ( source_desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM ) {
 for ( int row = 0; row < h; row++ ) {
 const uint8_t* src = static_cast< const uint8_t* >( mapped.pData ) + row * mapped.RowPitch;
-uint8_t* dst = out_pixels + row * w;
+uint8_t* dst = out_pixels + static_cast< size_t >( h - 1 - row ) * w;
 for ( int col = 0; col < w; col++ ) {
 dst[ col ] = src[ col * 4 ];
 }
@@ -606,7 +606,7 @@ static void dx11_update_texture_region_from_greyscale( ID3D11Texture2D* texture,
 	std::vector< uint8_t > rgba_pixels( static_cast< size_t >( w ) * static_cast< size_t >( h ) * 4 );
 	for ( int row = 0; row < h; row++ ) {
 		for ( int col = 0; col < w; col++ ) {
-			const uint8_t value = pixels[ static_cast< size_t >( row ) * w + col ];
+			const uint8_t value = pixels[ static_cast< size_t >( h - 1 - row ) * w + col ];
 			const size_t dst_index = ( static_cast< size_t >( row ) * w + col ) * 4;
 			rgba_pixels[ dst_index + 0 ] = value;
 			rgba_pixels[ dst_index + 1 ] = value;
@@ -1509,6 +1509,53 @@ clear_framebuffer_colour( g_backbuffer_rtv );
 g_context->Flush();
 }
 
+static void backend_test_reset_surfaces()
+{
+	clear_backend_test_surfaces();
+	g_context->Flush();
+}
+
+static bool backend_test_write_surface( const char* name, int x, int y, int w, int h, const uint8_t* pixels )
+{
+	if ( !name || !pixels || x < 0 || y < 0 || w <= 0 || h <= 0 ) {
+		return false;
+	}
+
+	if ( std::strcmp( name, "glyph_buffer" ) == 0 ) {
+		if ( x + w > VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH || y + h > VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT ) {
+			return false;
+		}
+		dx11_update_texture_region_from_greyscale(
+			g_glyph_buffer.texture,
+			VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT,
+			x,
+			y,
+			w,
+			h,
+			pixels );
+		g_context->Flush();
+		return true;
+	}
+
+	if ( std::strcmp( name, "atlas" ) == 0 ) {
+		if ( x + w > VE_FONTCACHE_ATLAS_WIDTH || y + h > VE_FONTCACHE_ATLAS_HEIGHT ) {
+			return false;
+		}
+		dx11_update_texture_region_from_greyscale(
+			g_atlas.texture,
+			VE_FONTCACHE_ATLAS_HEIGHT,
+			x,
+			y,
+			w,
+			h,
+			pixels );
+		g_context->Flush();
+		return true;
+	}
+
+	return false;
+}
+
 static bool backend_test_readback( const char* name, int x, int y, int w, int h, uint8_t* out_pixels )
 {
 if ( std::strcmp( name, "glyph_buffer" ) == 0 ) {
@@ -1578,6 +1625,8 @@ options.cjk_font = cjk_test_font;
 options.huge_font = huge_test_font;
 options.execute = backend_test_execute;
 options.readback = backend_test_readback;
+options.reset_surfaces = backend_test_reset_surfaces;
+options.write_surface = backend_test_write_surface;
 options.reload_font = [ &reload_buffers ]() -> ve_font_id {
 reload_buffers.emplace_back();
 return load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", reload_buffers.back(), 19.0f );

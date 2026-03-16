@@ -67,7 +67,7 @@ UTEST( shape_cache_eviction, cursor_pos_correct_after_eviction )
 	float second_cursor_x = ctx.cache.cursor_pos.x;
 
 	// The cursor positions should match (same layout reproduced)
-	EXPECT_NEAR( first_cursor_x, second_cursor_x, 0.1f );
+	EXPECT_TRUE( std::fabs( first_cursor_x - second_cursor_x ) <= 0.1f );
 }
 
 UTEST( shape_cache_eviction, next_cache_idx_wraps )
