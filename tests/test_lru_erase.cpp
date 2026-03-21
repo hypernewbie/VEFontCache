@@ -105,7 +105,7 @@ UTEST( lru_erase, frees_slot_for_new_entry_without_eviction )
 
 	size_t size_after_insert = lru.cache.size();
 
-	EXPECT_EQ( size_before_insert - 1 + 1, size_after_insert );
+	EXPECT_EQ( size_before_insert + 1, size_after_insert );
 	EXPECT_LE( size_after_insert, static_cast< size_t >( lru.capacity ) );
 
 	// Verify the new key is retrievable

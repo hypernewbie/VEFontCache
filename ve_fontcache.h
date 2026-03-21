@@ -1924,7 +1924,7 @@ bool ve_fontcache_draw_text( ve_fontcache* cache, ve_font_id font, const std::u8
 		return false;
 	}
 	if ( font < 0 || font >= ( ve_font_id ) cache->entry.size() || !cache->entry[ font ].used ) {
-		printf( "ve_fontcache_draw_text: invalid font id %d.\n", font );
+		printf( "ve_fontcache_draw_text: invalid font id %d.\n", static_cast< int >( font ) );
 		return false;
 	}
 

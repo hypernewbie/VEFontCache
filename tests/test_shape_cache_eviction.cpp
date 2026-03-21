@@ -25,12 +25,12 @@ UTEST( shape_cache_eviction, evicted_entry_is_reshaped )
 
 	// Now draw the first string again (should have been evicted)
 	ASSERT_TRUE( vefc_test::draw_text( ctx, font, strings[ 0 ] ) );
-	vefc_test::flush( ctx );
 
 	auto* drawlist = vefc_test::current_drawlist( ctx );
 	EXPECT_GT( drawlist->dcalls.size(), 0u );
 	EXPECT_TRUE( vefc_test::all_indices_in_range( *drawlist ) );
 	EXPECT_TRUE( vefc_test::all_vertices_finite( *drawlist ) );
+	vefc_test::flush( ctx );
 
 	// Verify cursor position is valid after reshaping
 	EXPECT_NE( ctx.cache.cursor_pos.x, -1.0f );
@@ -77,12 +77,11 @@ UTEST( shape_cache_eviction, next_cache_idx_wraps )
 
 	ASSERT_GE( font, 0 );
 
-	uint32_t initial_next_idx = ctx.cache.shape_cache.next_cache_idx;
-
 	// Draw unique strings until we fill the cache
 	for ( int i = 0; i < VE_FONTCACHE_SHAPECACHE_SIZE; i++ ) {
-		std::u8string label = vefc_test::make_ascii_string( static_cast< size_t >( i + 500 ) );
-		ASSERT_TRUE( vefc_test::draw_text( ctx, font, label ) );
+		std::string label = "shape-fill-" + std::to_string( i );
+		std::u8string text = vefc_test::to_u8string( label );
+		ASSERT_TRUE( vefc_test::draw_text( ctx, font, text ) );
 		vefc_test::flush( ctx );
 
 		EXPECT_LE( ctx.cache.shape_cache.next_cache_idx, VE_FONTCACHE_SHAPECACHE_SIZE );
@@ -94,8 +93,9 @@ UTEST( shape_cache_eviction, next_cache_idx_wraps )
 
 	// Draw more strings - verify next_cache_idx doesn't exceed size (it wraps/reuses slots)
 	for ( int i = 0; i < 50; i++ ) {
-		std::u8string label = vefc_test::make_ascii_string( static_cast< size_t >( i + 10000 ) );
-		ASSERT_TRUE( vefc_test::draw_text( ctx, font, label ) );
+		std::string label = "shape-wrap-" + std::to_string( i );
+		std::u8string text = vefc_test::to_u8string( label );
+		ASSERT_TRUE( vefc_test::draw_text( ctx, font, text ) );
 		vefc_test::flush( ctx );
 
 		EXPECT_LE( ctx.cache.shape_cache.next_cache_idx, VE_FONTCACHE_SHAPECACHE_SIZE );

@@ -32,12 +32,11 @@ UTEST( set_font_size, produces_different_drawlist_after_resize )
 	ve_fontcache_set_font_size( &ctx.cache, font, 48.0f );
 
 	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"Hello" ) );
-	vefc_test::flush( ctx );
-
 	auto* drawlist = vefc_test::current_drawlist( ctx );
 	EXPECT_GT( drawlist->dcalls.size(), 0u );
 	EXPECT_TRUE( vefc_test::all_indices_in_range( *drawlist ) );
 	EXPECT_TRUE( vefc_test::all_vertices_finite( *drawlist ) );
+	vefc_test::flush( ctx );
 
 	EXPECT_EQ( 48.0f, entry.size );
 }

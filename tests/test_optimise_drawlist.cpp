@@ -10,6 +10,10 @@ UTEST( optimise_drawlist, different_colours_not_merged )
 	float red[ 4 ] = { 1.0f, 0.0f, 0.0f, 1.0f };
 	float green[ 4 ] = { 0.0f, 1.0f, 0.0f, 1.0f };
 
+	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"A" ) );
+	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"B" ) );
+	vefc_test::flush( ctx );
+
 	ve_fontcache_set_colour( &ctx.cache, red );
 	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"A" ) );
 
@@ -37,6 +41,10 @@ UTEST( optimise_drawlist, same_colour_consecutive_draws_merged )
 	ASSERT_GE( font, 0 );
 
 	float red[ 4 ] = { 1.0f, 0.0f, 0.0f, 1.0f };
+
+	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"A" ) );
+	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"B" ) );
+	vefc_test::flush( ctx );
 
 	ve_fontcache_set_colour( &ctx.cache, red );
 	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"A" ) );
