@@ -922,6 +922,13 @@ static void backend_test_reset_surfaces()
 	glFinish();
 }
 
+static void backend_test_finalise_state()
+{
+	ve_fontcache_reset_transient_test_state( &cache );
+	clear_backend_test_surfaces( true );
+	glFinish();
+}
+
 #ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
 static void backend_test_ensure_cpu_atlas_page( size_t atlas_page )
 {
@@ -1110,7 +1117,6 @@ static int run_backend_test_mode()
 		cache = ve_fontcache();
 		ve_fontcache_init( &cache, use_freetype );
 		ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
-		load_demo_fonts();
 
 		std::vector< uint8_t > huge_buffer;
 		std::vector< uint8_t > fallback_print_buffer;
@@ -1138,33 +1144,69 @@ static int run_backend_test_mode()
 		if ( !use_freetype ) {
 			apply_font_fallbacks();
 		}
-		ve_font_id huge_test_font = load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", huge_buffer, 200.0f );
-		if ( huge_test_font < 0 && !use_freetype ) {
-			huge_test_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", huge_buffer, 200.0f );
-		}
-		normalize_demo_font_ids( &huge_test_font );
-
-		bool fonts_ready =
-			print_font >= 0
-			&& huge_test_font >= 0;
-		if ( !fonts_ready ) {
-			printf( "VEFontCache backend tests [%s] failed to load one or more demo fonts.\n", mode_name );
-			ve_fontcache_shutdown( &cache );
-			return false;
-		}
 
 		clear_backend_test_surfaces( use_freetype ? false : true );
 
 		ve_fontcache_backend_test_options options;
 		options.cache = &cache;
-		options.font = print_font;
-		options.secondary_font = title_font >= 0 ? title_font : print_font;
-		options.small_font = small_font >= 0 ? small_font : print_font;
-		options.latin_font = demo_grid3_font >= 0 ? demo_grid3_font : options.secondary_font;
-		options.cjk_font = demo_grid2_font >= 0 ? demo_grid2_font : print_font;
-		options.huge_font = huge_test_font;
-		options.arabic_font = use_freetype ? demo_arabic_font : -1;
-		options.hebrew_font = use_freetype ? demo_hebrew_font : -1;
+		options.provision_fonts = [&, use_freetype](
+			ve_fontcache* target_cache,
+			const ve_fontcache_backend_test_font_spec* roles,
+			size_t role_count ) -> ve_fontcache_backend_test_font_set {
+			ve_fontcache_backend_test_font_set font_set;
+			if ( target_cache != &cache ) {
+				for ( size_t i = 0; i < role_count; i++ ) {
+					font_set.mark_unavailable( roles[ i ].role, "demo test runner expected the active demo cache" );
+				}
+				return font_set;
+			}
+
+			load_demo_fonts();
+			if ( !use_freetype ) {
+				apply_font_fallbacks();
+			}
+			ve_font_id huge_test_font = load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", huge_buffer, 200.0f );
+			if ( huge_test_font < 0 && !use_freetype ) {
+				huge_test_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", huge_buffer, 200.0f );
+			}
+			normalize_demo_font_ids( &huge_test_font );
+
+			const auto assign_role = [&]( ve_fontcache_backend_test_font_role role, ve_font_id id, const char* reason ) {
+				if ( id >= 0 ) {
+					font_set.set( role, id );
+				} else {
+					font_set.mark_unavailable( role, reason );
+				}
+			};
+
+			assign_role( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY, print_font, "demo primary font failed to load" );
+			assign_role(
+				VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SECONDARY,
+				title_font >= 0 ? title_font : print_font,
+				"demo secondary font failed to load" );
+			assign_role(
+				VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SMALL,
+				small_font >= 0 ? small_font : print_font,
+				"demo small font failed to load" );
+			assign_role(
+				VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_LATIN,
+				demo_grid3_font >= 0 ? demo_grid3_font : ( title_font >= 0 ? title_font : print_font ),
+				"demo latin font failed to load" );
+			assign_role(
+				VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_CJK,
+				demo_grid2_font >= 0 ? demo_grid2_font : print_font,
+				"demo CJK font failed to load" );
+			assign_role( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HUGE, huge_test_font, "demo huge font failed to load" );
+			assign_role(
+				VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_ARABIC,
+				use_freetype ? demo_arabic_font : -1,
+				use_freetype ? "demo Arabic font failed to load" : "Arabic role is only used in FreeType mode" );
+			assign_role(
+				VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HEBREW,
+				use_freetype ? demo_hebrew_font : -1,
+				use_freetype ? "demo Hebrew font failed to load" : "Hebrew role is only used in FreeType mode" );
+			return font_set;
+		};
 		options.capabilities.has_present_surface = true;
 		options.capabilities.has_target_linear_surface = true;
 #ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
@@ -1193,17 +1235,9 @@ static int run_backend_test_mode()
 			cache = ve_fontcache();
 			ve_fontcache_init( &cache, use_freetype );
 			ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
-			load_demo_fonts();
-			if ( !use_freetype ) {
-				apply_font_fallbacks();
-			}
-			ve_font_id refreshed_huge_font = load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", huge_buffer, 200.0f );
-			if ( refreshed_huge_font < 0 && !use_freetype ) {
-				refreshed_huge_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", huge_buffer, 200.0f );
-			}
-			normalize_demo_font_ids( &refreshed_huge_font );
 			clear_backend_test_surfaces( true );
 		};
+		options.finalise_test_state = backend_test_finalise_state;
 
 		ve_fontcache_backend_test_result result = ve_fontcache_backend_test_run( options );
 		printf(

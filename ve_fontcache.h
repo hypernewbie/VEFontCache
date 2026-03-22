@@ -910,6 +910,19 @@ void ve_fontcache_flush_drawlist( ve_fontcache* cache )
 	ve_fontcache_clear_drawlist( cache->drawlist );
 }
 
+void ve_fontcache_reset_transient_test_state( ve_fontcache* cache )
+{
+	STBTT_assert( cache );
+	ve_fontcache_flush_drawlist( cache );
+	ve_fontcache_clear_drawlist( cache->atlas.glyph_update_batch_clear_drawlist );
+	ve_fontcache_clear_drawlist( cache->atlas.glyph_update_batch_drawlist );
+	cache->atlas.glyph_update_batch_x = 0;
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+	ve_fontcache_clear_drawlist( cache->atlasCPU.drawlist );
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
+	cache->temp_codepoint_seen.clear();
+}
+
 inline ve_fontcache_vec2 ve_fontcache_eval_bezier( ve_fontcache_vec2 p0, ve_fontcache_vec2 p1, ve_fontcache_vec2 p2, float t )
 {
 	float t2 = t * t, c0 = ( 1.0f - t ) * ( 1.0f - t ), c1 = 2.0f * ( 1.0f - t ) * t, c2 = t2;

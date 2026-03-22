@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <iomanip>
+#include <initializer_list>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -22,6 +23,7 @@ using ve_fontcache_backend_write_surface_fn =
 	std::function< bool( const char* name, int x, int y, int w, int h, const uint8_t* pixels ) >;
 using ve_fontcache_backend_reload_font_fn = std::function< ve_font_id() >;
 using ve_fontcache_backend_prepare_real_text_fn = std::function< void() >;
+using ve_fontcache_backend_finalise_test_state_fn = std::function< void() >;
 
 struct ve_fontcache_backend_test_capabilities
 {
@@ -32,9 +34,77 @@ struct ve_fontcache_backend_test_capabilities
 	bool supports_harfbuzz_mode = false;
 };
 
+enum ve_fontcache_backend_test_font_role
+{
+	VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY = 0,
+	VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SECONDARY,
+	VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SMALL,
+	VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_LATIN,
+	VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_CJK,
+	VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HUGE,
+	VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_ARABIC,
+	VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HEBREW,
+	VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_COUNT,
+};
+
+struct ve_fontcache_backend_test_font_spec
+{
+	ve_fontcache_backend_test_font_role role = VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY;
+	bool optional = false;
+};
+
+struct ve_fontcache_backend_test_font_entry
+{
+	ve_font_id id = -1;
+	bool available = false;
+	std::string diagnostic;
+};
+
+struct ve_fontcache_backend_test_font_set
+{
+	std::array< ve_fontcache_backend_test_font_entry, static_cast< size_t >( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_COUNT ) >
+		entries {};
+
+	ve_fontcache_backend_test_font_entry& operator[]( ve_fontcache_backend_test_font_role role )
+	{
+		return entries[ static_cast< size_t >( role ) ];
+	}
+
+	const ve_fontcache_backend_test_font_entry& operator[]( ve_fontcache_backend_test_font_role role ) const
+	{
+		return entries[ static_cast< size_t >( role ) ];
+	}
+
+	bool has( ve_fontcache_backend_test_font_role role ) const
+	{
+		const ve_fontcache_backend_test_font_entry& entry = ( *this )[ role ];
+		return entry.available && entry.id >= 0;
+	}
+
+	void set( ve_fontcache_backend_test_font_role role, ve_font_id id, std::string diagnostic = {} )
+	{
+		ve_fontcache_backend_test_font_entry& entry = ( *this )[ role ];
+		entry.id = id;
+		entry.available = id >= 0;
+		entry.diagnostic = diagnostic;
+	}
+
+	void mark_unavailable( ve_fontcache_backend_test_font_role role, std::string diagnostic = {} )
+	{
+		ve_fontcache_backend_test_font_entry& entry = ( *this )[ role ];
+		entry.id = -1;
+		entry.available = false;
+		entry.diagnostic = diagnostic;
+	}
+};
+
+using ve_fontcache_backend_provision_fonts_fn = std::function<
+	ve_fontcache_backend_test_font_set( ve_fontcache* cache, const ve_fontcache_backend_test_font_spec* roles, size_t role_count ) >;
+
 struct ve_fontcache_backend_test_options
 {
 	ve_fontcache* cache = nullptr;
+	// Deprecated compatibility path when provision_fonts is not supplied.
 	ve_font_id font = -1;
 	ve_font_id secondary_font = -1;
 	ve_font_id small_font = -1;
@@ -43,6 +113,8 @@ struct ve_fontcache_backend_test_options
 	ve_font_id huge_font = -1;
 	ve_font_id arabic_font = -1;
 	ve_font_id hebrew_font = -1;
+	ve_fontcache_backend_provision_fonts_fn provision_fonts;
+	ve_fontcache_backend_test_font_set font_set;
 	ve_fontcache_backend_test_capabilities capabilities;
 	ve_fontcache_backend_execute_fn execute_pipeline;
 	ve_fontcache_backend_execute_fn execute_present;
@@ -52,6 +124,7 @@ struct ve_fontcache_backend_test_options
 	ve_fontcache_backend_write_surface_fn write_surface;
 	ve_fontcache_backend_reload_font_fn reload_font;
 	ve_fontcache_backend_prepare_real_text_fn prepare_real_text;
+	ve_fontcache_backend_finalise_test_state_fn finalise_test_state;
 };
 
 struct ve_fontcache_backend_test_result
@@ -63,6 +136,9 @@ struct ve_fontcache_backend_test_result
 	std::vector< std::string > failures;
 	std::vector< std::string > skipped_tests;
 };
+
+inline ve_fontcache_backend_test_options ve_fontcache_backend_test_resolve_font_roles(
+	const ve_fontcache_backend_test_options& options );
 
 inline void ve_fontcache_backend_test_expect(
 	ve_fontcache_backend_test_result& result,
@@ -85,6 +161,258 @@ inline void ve_fontcache_backend_test_skip(
 {
 	result.skipped++;
 	result.skipped_tests.emplace_back( msg );
+}
+
+inline const char* ve_fontcache_backend_test_font_role_name( ve_fontcache_backend_test_font_role role )
+{
+	switch ( role ) {
+		case VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY: return "primary";
+		case VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SECONDARY: return "secondary";
+		case VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SMALL: return "small";
+		case VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_LATIN: return "latin";
+		case VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_CJK: return "cjk";
+		case VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HUGE: return "huge";
+		case VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_ARABIC: return "arabic";
+		case VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HEBREW: return "hebrew";
+		default: return "unknown";
+	}
+}
+
+inline const std::array< ve_fontcache_backend_test_font_spec, static_cast< size_t >( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_COUNT ) >&
+ve_fontcache_backend_test_default_font_specs()
+{
+	static const std::array< ve_fontcache_backend_test_font_spec, static_cast< size_t >( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_COUNT ) >
+		specs = { {
+			{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY, false },
+			{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SECONDARY, false },
+			{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SMALL, false },
+			{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_LATIN, false },
+			{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_CJK, false },
+			{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HUGE, false },
+			{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_ARABIC, true },
+			{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HEBREW, true },
+		} };
+	return specs;
+}
+
+inline ve_fontcache_backend_test_font_set ve_fontcache_backend_test_legacy_font_set(
+	const ve_fontcache_backend_test_options& options )
+{
+	ve_fontcache_backend_test_font_set font_set;
+	font_set.set( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY, options.font );
+	font_set.set( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SECONDARY, options.secondary_font );
+	font_set.set( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SMALL, options.small_font );
+	font_set.set( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_LATIN, options.latin_font );
+	font_set.set( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_CJK, options.cjk_font );
+	font_set.set( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HUGE, options.huge_font );
+	font_set.set( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_ARABIC, options.arabic_font );
+	font_set.set( VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HEBREW, options.hebrew_font );
+	return font_set;
+}
+
+inline ve_fontcache_backend_test_font_set ve_fontcache_backend_test_resolve_font_set(
+	const ve_fontcache_backend_test_options& options )
+{
+	ve_fontcache_backend_test_font_set font_set = options.provision_fonts
+		? options.provision_fonts(
+			options.cache,
+			ve_fontcache_backend_test_default_font_specs().data(),
+			ve_fontcache_backend_test_default_font_specs().size() )
+		: ve_fontcache_backend_test_legacy_font_set( options );
+
+	for ( size_t role_index = 0; role_index < font_set.entries.size(); role_index++ ) {
+		ve_fontcache_backend_test_font_entry& entry = font_set.entries[ role_index ];
+		const bool candidate_available = entry.available || entry.id >= 0;
+		if ( !candidate_available ) {
+			entry.id = -1;
+			if ( entry.diagnostic.empty() ) {
+				entry.diagnostic = options.provision_fonts ? "not supplied" : "legacy font id not supplied";
+			}
+			continue;
+		}
+
+		if ( !options.cache || !ve_fontcache_is_valid_font_id( options.cache, entry.id ) ) {
+			entry.id = -1;
+			entry.available = false;
+			if ( entry.diagnostic.empty() ) {
+				entry.diagnostic = "supplied invalid font id";
+			}
+			continue;
+		}
+
+		entry.available = true;
+	}
+
+	return font_set;
+}
+
+inline ve_fontcache_backend_test_options ve_fontcache_backend_test_resolve_font_roles(
+	const ve_fontcache_backend_test_options& options )
+{
+	ve_fontcache_backend_test_options resolved = options;
+	resolved.font_set = ve_fontcache_backend_test_resolve_font_set( options );
+	resolved.font = resolved.font_set[ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY ].id;
+	resolved.secondary_font = resolved.font_set[ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SECONDARY ].id;
+	resolved.small_font = resolved.font_set[ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SMALL ].id;
+	resolved.latin_font = resolved.font_set[ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_LATIN ].id;
+	resolved.cjk_font = resolved.font_set[ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_CJK ].id;
+	resolved.huge_font = resolved.font_set[ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HUGE ].id;
+	resolved.arabic_font = resolved.font_set[ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_ARABIC ].id;
+	resolved.hebrew_font = resolved.font_set[ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HEBREW ].id;
+	return resolved;
+}
+
+inline bool ve_fontcache_backend_test_has_role(
+	const ve_fontcache_backend_test_options& options,
+	ve_fontcache_backend_test_font_role role )
+{
+	return options.font_set.has( role );
+}
+
+inline ve_font_id ve_fontcache_backend_test_pick_first_available_role(
+	const ve_fontcache_backend_test_options& options,
+	std::initializer_list< ve_fontcache_backend_test_font_role > roles )
+{
+	for ( ve_fontcache_backend_test_font_role role : roles ) {
+		if ( options.font_set.has( role ) ) {
+			return options.font_set[ role ].id;
+		}
+	}
+	return -1;
+}
+
+inline std::string ve_fontcache_backend_test_format_role_list(
+	std::initializer_list< ve_fontcache_backend_test_font_role > roles )
+{
+	std::ostringstream builder;
+	bool first = true;
+	for ( ve_fontcache_backend_test_font_role role : roles ) {
+		if ( !first ) {
+			builder << "/";
+		}
+		builder << ve_fontcache_backend_test_font_role_name( role );
+		first = false;
+	}
+	return builder.str();
+}
+
+inline std::string ve_fontcache_backend_test_format_missing_role_details(
+	const ve_fontcache_backend_test_options& options,
+	std::initializer_list< ve_fontcache_backend_test_font_role > roles )
+{
+	std::ostringstream builder;
+	bool first = true;
+	for ( ve_fontcache_backend_test_font_role role : roles ) {
+		if ( options.font_set.has( role ) ) {
+			continue;
+		}
+
+		const std::string& diagnostic = options.font_set[ role ].diagnostic;
+		if ( diagnostic.empty() ) {
+			continue;
+		}
+
+		if ( first ) {
+			builder << " [";
+		} else {
+			builder << "; ";
+		}
+		builder << ve_fontcache_backend_test_font_role_name( role ) << ": " << diagnostic;
+		first = false;
+	}
+
+	if ( !first ) {
+		builder << "]";
+	}
+	return builder.str();
+}
+
+inline std::string ve_fontcache_backend_test_format_role_list(
+	const std::vector< ve_fontcache_backend_test_font_role >& roles )
+{
+	std::ostringstream builder;
+	for ( size_t i = 0; i < roles.size(); i++ ) {
+		if ( i > 0 ) {
+			builder << "/";
+		}
+		builder << ve_fontcache_backend_test_font_role_name( roles[ i ] );
+	}
+	return builder.str();
+}
+
+inline std::string ve_fontcache_backend_test_format_missing_role_details(
+	const ve_fontcache_backend_test_options& options,
+	const std::vector< ve_fontcache_backend_test_font_role >& roles )
+{
+	std::ostringstream builder;
+	bool first = true;
+	for ( ve_fontcache_backend_test_font_role role : roles ) {
+		if ( options.font_set.has( role ) ) {
+			continue;
+		}
+
+		const std::string& diagnostic = options.font_set[ role ].diagnostic;
+		if ( diagnostic.empty() ) {
+			continue;
+		}
+
+		if ( first ) {
+			builder << " [";
+		} else {
+			builder << "; ";
+		}
+		builder << ve_fontcache_backend_test_font_role_name( role ) << ": " << diagnostic;
+		first = false;
+	}
+
+	if ( !first ) {
+		builder << "]";
+	}
+	return builder.str();
+}
+
+inline bool ve_fontcache_backend_test_require_roles(
+	ve_fontcache_backend_test_result& result,
+	const ve_fontcache_backend_test_options& options,
+	std::string_view suite_name,
+	std::initializer_list< ve_fontcache_backend_test_font_role > roles )
+{
+	std::vector< ve_fontcache_backend_test_font_role > missing_roles;
+	for ( ve_fontcache_backend_test_font_role role : roles ) {
+		if ( !options.font_set.has( role ) ) {
+			missing_roles.push_back( role );
+		}
+	}
+
+	if ( missing_roles.empty() ) {
+		return true;
+	}
+
+	const std::string source = options.provision_fonts ? "provision_fonts did not supply " : "legacy font ids did not supply ";
+	const std::string role_text = ve_fontcache_backend_test_format_role_list( missing_roles );
+	const std::string details = ve_fontcache_backend_test_format_missing_role_details( options, missing_roles );
+	ve_fontcache_backend_test_skip( result, std::string( suite_name ) + " skipped: " + source + role_text + " roles" + details );
+	return false;
+}
+
+inline bool ve_fontcache_backend_test_require_any_role(
+	ve_fontcache_backend_test_result& result,
+	const ve_fontcache_backend_test_options& options,
+	std::string_view suite_name,
+	std::initializer_list< ve_fontcache_backend_test_font_role > roles )
+{
+	for ( ve_fontcache_backend_test_font_role role : roles ) {
+		if ( options.font_set.has( role ) ) {
+			return true;
+		}
+	}
+
+	const std::string source = options.provision_fonts ? "provision_fonts did not supply any of " : "legacy font ids did not supply any of ";
+	ve_fontcache_backend_test_skip(
+		result,
+		std::string( suite_name ) + " skipped: " + source + ve_fontcache_backend_test_format_role_list( roles ) + " roles"
+			+ ve_fontcache_backend_test_format_missing_role_details( options, roles ) );
+	return false;
 }
 
 inline bool ve_fontcache_backend_test_is_target_pass( uint32_t pass )
@@ -2146,10 +2474,18 @@ inline bool ve_fontcache_backend_test_execute_frame( const ve_fontcache_backend_
 	return true;
 }
 
-inline void ve_fontcache_backend_test_prepare_real_text( const ve_fontcache_backend_test_options& options )
+inline void ve_fontcache_backend_test_prepare_real_text( ve_fontcache_backend_test_options& options )
 {
 	if ( options.prepare_real_text ) {
 		options.prepare_real_text();
+	}
+	options = ve_fontcache_backend_test_resolve_font_roles( options );
+}
+
+inline void ve_fontcache_backend_test_finalise_state( const ve_fontcache_backend_test_options& options )
+{
+	if ( options.finalise_test_state ) {
+		options.finalise_test_state();
 	}
 }
 
@@ -2349,6 +2685,14 @@ inline void ve_fontcache_backend_test_run_structural_checks(
 	ve_fontcache_backend_test_result& result,
 	const ve_fontcache_backend_test_options& options )
 {
+	if ( !ve_fontcache_backend_test_require_roles(
+		result,
+		options,
+		"structural checks",
+		{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY } ) ) {
+		return;
+	}
+
 	const std::u8string text = u8"Hello, World! 日本語";
 	ve_fontcache_drawlist* drawlist = ve_fontcache_backend_test_draw( result, options.cache, options.font, text );
 	ve_fontcache_backend_test_expect( result, !drawlist->dcalls.empty(), "drawlist was not empty" );
@@ -2360,6 +2704,14 @@ inline void ve_fontcache_backend_test_run_caching_checks(
 	ve_fontcache_backend_test_result& result,
 	const ve_fontcache_backend_test_options& options )
 {
+	if ( !ve_fontcache_backend_test_require_roles(
+		result,
+		options,
+		"caching checks",
+		{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY } ) ) {
+		return;
+	}
+
 #ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
 	if ( options.cache->use_freetype ) {
 		ve_fontcache_backend_test_skip( result, "caching checks skipped in FreeType mode" );
@@ -2391,7 +2743,7 @@ inline void ve_fontcache_backend_test_run_caching_checks(
 		ve_fontcache_backend_test_count_cache_miss_passes( *options.cache, *drawlist ) > 0,
 		"different text triggered fresh glyph work" );
 
-	if ( options.secondary_font >= 0 ) {
+	if ( ve_fontcache_backend_test_has_role( options, VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SECONDARY ) ) {
 		(void) ve_fontcache_backend_test_draw( result, options.cache, options.font, u8"A" );
 		drawlist = ve_fontcache_backend_test_draw( result, options.cache, options.secondary_font, u8"A" );
 		ve_fontcache_backend_test_expect(
@@ -2399,7 +2751,7 @@ inline void ve_fontcache_backend_test_run_caching_checks(
 			ve_fontcache_backend_test_count_cache_miss_passes( *options.cache, *drawlist ) > 0,
 			"same glyph in a second font used an independent cache entry" );
 	} else {
-		ve_fontcache_backend_test_skip( result, "multi-font independence skipped: secondary_font not supplied" );
+		ve_fontcache_backend_test_skip( result, "multi-font independence skipped: secondary role not supplied" );
 	}
 
 	ve_fontcache_flush_drawlist( options.cache );
@@ -2439,7 +2791,7 @@ inline void ve_fontcache_backend_test_run_region_checks(
 				"small-font glyph routed into atlas region A or B" );
 		}
 	} else {
-		ve_fontcache_backend_test_skip( result, "small-font routing skipped: small_font not supplied" );
+		ve_fontcache_backend_test_skip( result, "small-font routing skipped: small role not supplied" );
 	}
 
 	if ( options.latin_font >= 0 ) {
@@ -2465,7 +2817,7 @@ inline void ve_fontcache_backend_test_run_region_checks(
 				"standard latin glyph routed into atlas region B or C" );
 		}
 	} else {
-		ve_fontcache_backend_test_skip( result, "latin-font routing skipped: latin_font not supplied" );
+		ve_fontcache_backend_test_skip( result, "latin-font routing skipped: latin role not supplied" );
 	}
 
 	if ( options.cjk_font >= 0 ) {
@@ -2491,7 +2843,7 @@ inline void ve_fontcache_backend_test_run_region_checks(
 				"CJK glyph routed into atlas region C or D" );
 		}
 	} else {
-		ve_fontcache_backend_test_skip( result, "CJK routing skipped: cjk_font not supplied" );
+		ve_fontcache_backend_test_skip( result, "CJK routing skipped: cjk role not supplied" );
 	}
 
 	if ( options.huge_font >= 0 ) {
@@ -2510,7 +2862,7 @@ inline void ve_fontcache_backend_test_run_region_checks(
 				&& after.region_D == before.region_D,
 			"very large glyphs skipped atlas insertion" );
 	} else {
-		ve_fontcache_backend_test_skip( result, "huge-font routing skipped: huge_font not supplied" );
+		ve_fontcache_backend_test_skip( result, "huge-font routing skipped: huge role not supplied" );
 	}
 }
 
@@ -2524,6 +2876,14 @@ inline void ve_fontcache_backend_test_run_lru_checks(
 		return;
 	}
 #endif // VE_FONTCACHE_FREETYPE_RASTERISATION
+
+	if ( !ve_fontcache_backend_test_require_any_role(
+		result,
+		options,
+		"atlas LRU checks",
+		{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SMALL, VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_CJK } ) ) {
+		return;
+	}
 
 	ve_fontcache_LRU_init( options.cache->atlas.stateA, VE_FONTCACHE_ATLAS_REGION_A_CAPACITY );
 	ve_fontcache_LRU_init( options.cache->atlas.stateB, VE_FONTCACHE_ATLAS_REGION_B_CAPACITY );
@@ -2651,6 +3011,14 @@ inline void ve_fontcache_backend_test_run_edge_case_checks(
 	ve_fontcache_backend_test_result& result,
 	const ve_fontcache_backend_test_options& options )
 {
+	if ( !ve_fontcache_backend_test_require_roles(
+		result,
+		options,
+		"edge-case checks",
+		{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY } ) ) {
+		return;
+	}
+
 	ve_fontcache_drawlist* drawlist = ve_fontcache_backend_test_draw( result, options.cache, options.font, u8"" );
 	ve_fontcache_backend_test_expect(
 		result,
@@ -2724,6 +3092,14 @@ inline void ve_fontcache_backend_test_run_reload_checks(
 	ve_fontcache_backend_test_result& result,
 	const ve_fontcache_backend_test_options& options )
 {
+	if ( !ve_fontcache_backend_test_require_roles(
+		result,
+		options,
+		"font unload and reload",
+		{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY } ) ) {
+		return;
+	}
+
 #ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
 	if ( options.cache->use_freetype ) {
 		ve_fontcache_backend_test_skip( result, "font unload and reload skipped in FreeType mode" );
@@ -2767,7 +3143,13 @@ inline void ve_fontcache_backend_test_run_readback_checks(
 		return;
 	}
 
-	ve_font_id font = options.small_font >= 0 ? options.small_font : options.font;
+	ve_font_id font = ve_fontcache_backend_test_pick_first_available_role(
+		options,
+		{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SMALL, VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY } );
+	if ( font < 0 ) {
+		ve_fontcache_backend_test_skip( result, "GPU readback checks skipped: primary/small roles not supplied" );
+		return;
+	}
 	char32_t codepoint = 0;
 	char region = '\0';
 	if ( !ve_fontcache_backend_test_find_uncached_codepoint_for_regions( options.cache, font, "ABCD", 0x20, 0x9FFF, codepoint, region ) ) {
@@ -5374,7 +5756,7 @@ inline void ve_fontcache_backend_test_run_pipeline_end_to_end_freetype(
 
 inline void ve_fontcache_backend_test_run_real_text_cached_glyph_orientation(
 	ve_fontcache_backend_test_result& result,
-	const ve_fontcache_backend_test_options& options )
+	ve_fontcache_backend_test_options& options )
 {
 	if ( !ve_fontcache_backend_test_require_suite(
 		result,
@@ -5387,6 +5769,15 @@ inline void ve_fontcache_backend_test_run_real_text_cached_glyph_orientation(
 		return;
 	}
 
+	ve_fontcache_backend_test_prepare_real_text( options );
+	if ( !ve_fontcache_backend_test_require_roles(
+		result,
+		options,
+		"real_text_cached_glyph_orientation",
+		{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY } ) ) {
+		return;
+	}
+
 	const ve_font_id font = options.font;
 	const std::u8string glyph_text = u8"R";
 
@@ -5394,7 +5785,6 @@ inline void ve_fontcache_backend_test_run_real_text_cached_glyph_orientation(
 	const int target_h = ve_fontcache_backend_test_target_height( options.cache );
 	const float sx = 1.0f / target_w;
 	const float sy = 1.0f / target_h;
-	ve_fontcache_backend_test_prepare_real_text( options );
 	ve_fontcache_backend_test_reset_state( options );
 	ve_fontcache_drawlist* drawlist = ve_fontcache_backend_test_draw(
 		result,
@@ -5469,7 +5859,7 @@ inline void ve_fontcache_backend_test_run_real_text_cached_glyph_orientation(
 
 inline void ve_fontcache_backend_test_run_real_text_uncached_glyph_orientation(
 	ve_fontcache_backend_test_result& result,
-	const ve_fontcache_backend_test_options& options )
+	ve_fontcache_backend_test_options& options )
 {
 	if ( !ve_fontcache_backend_test_require_suite(
 		result,
@@ -5482,8 +5872,12 @@ inline void ve_fontcache_backend_test_run_real_text_uncached_glyph_orientation(
 		return;
 	}
 
-	if ( options.huge_font < 0 ) {
-		ve_fontcache_backend_test_skip( result, "real_text_uncached_glyph_orientation skipped: huge_font not supplied" );
+	ve_fontcache_backend_test_prepare_real_text( options );
+	if ( !ve_fontcache_backend_test_require_roles(
+		result,
+		options,
+		"real_text_uncached_glyph_orientation",
+		{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HUGE } ) ) {
 		return;
 	}
 
@@ -5491,7 +5885,6 @@ inline void ve_fontcache_backend_test_run_real_text_uncached_glyph_orientation(
 	const int target_h = ve_fontcache_backend_test_target_height( options.cache );
 	const float sx = 1.0f / target_w;
 	const float sy = 1.0f / target_h;
-	ve_fontcache_backend_test_prepare_real_text( options );
 	ve_fontcache_backend_test_reset_state( options );
 	ve_fontcache_drawlist* drawlist = ve_fontcache_backend_test_draw(
 		result,
@@ -5574,7 +5967,7 @@ inline void ve_fontcache_backend_test_run_real_text_uncached_glyph_orientation(
 
 inline void ve_fontcache_backend_test_run_real_text_cpu_cached_glyph_orientation(
 	ve_fontcache_backend_test_result& result,
-	const ve_fontcache_backend_test_options& options )
+	ve_fontcache_backend_test_options& options )
 {
 	if ( !ve_fontcache_backend_test_require_suite(
 		result,
@@ -5588,6 +5981,15 @@ inline void ve_fontcache_backend_test_run_real_text_cpu_cached_glyph_orientation
 		return;
 	}
 
+	ve_fontcache_backend_test_prepare_real_text( options );
+	if ( !ve_fontcache_backend_test_require_roles(
+		result,
+		options,
+		"real_text_cpu_cached_glyph_orientation",
+		{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY } ) ) {
+		return;
+	}
+
 	const ve_font_id font = options.font;
 	const std::u8string glyph_text = u8"R";
 
@@ -5595,7 +5997,6 @@ inline void ve_fontcache_backend_test_run_real_text_cpu_cached_glyph_orientation
 	const int target_h = ve_fontcache_backend_test_target_height( options.cache );
 	const float sx = 1.0f / target_w;
 	const float sy = 1.0f / target_h;
-	ve_fontcache_backend_test_prepare_real_text( options );
 	ve_fontcache_backend_test_reset_state( options );
 	ve_fontcache_drawlist* drawlist = ve_fontcache_backend_test_draw(
 		result,
@@ -5688,7 +6089,7 @@ inline void ve_fontcache_backend_test_run_real_text_cpu_cached_glyph_orientation
 
 inline void ve_fontcache_backend_test_run_real_text_canonical_glyph_orientation(
 	ve_fontcache_backend_test_result& result,
-	const ve_fontcache_backend_test_options& options )
+	ve_fontcache_backend_test_options& options )
 {
 	if ( !ve_fontcache_backend_test_require_suite(
 		result,
@@ -5701,6 +6102,20 @@ inline void ve_fontcache_backend_test_run_real_text_canonical_glyph_orientation(
 	}
 
 	ve_fontcache_backend_test_prepare_real_text( options );
+	if ( !ve_fontcache_backend_test_require_any_role(
+		result,
+		options,
+		"real_text_canonical_glyph_orientation",
+		{
+			VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY,
+			VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SECONDARY,
+			VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_SMALL,
+			VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_LATIN,
+			VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_CJK,
+			VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HUGE,
+		} ) ) {
+		return;
+	}
 
 	const int target_w = ve_fontcache_backend_test_target_width( options.cache );
 	const int target_h = ve_fontcache_backend_test_target_height( options.cache );
@@ -5868,7 +6283,7 @@ inline void ve_fontcache_backend_test_run_real_text_canonical_glyph_orientation(
 
 inline void ve_fontcache_backend_test_run_real_text_micro_scene(
 	ve_fontcache_backend_test_result& result,
-	const ve_fontcache_backend_test_options& options )
+	ve_fontcache_backend_test_options& options )
 {
 	if ( !ve_fontcache_backend_test_require_suite(
 		result,
@@ -5888,6 +6303,14 @@ inline void ve_fontcache_backend_test_run_real_text_micro_scene(
 	const ve_fontcache_backend_test_rect tr_window = { 940, 760, 640, 220 };
 	const ve_fontcache_backend_test_rect bl_window = { 32, 120, 640, 220 };
 	const ve_fontcache_backend_test_rect br_window = { 940, 120, 640, 220 };
+	ve_fontcache_backend_test_prepare_real_text( options );
+	if ( !ve_fontcache_backend_test_require_roles(
+		result,
+		options,
+		"real_text_micro_scene",
+		{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_PRIMARY } ) ) {
+		return;
+	}
 
 	auto draw_scene = [&]() {
 		ve_fontcache_backend_test_reset_state( options );
@@ -5971,7 +6394,7 @@ inline void ve_fontcache_backend_test_run_real_text_micro_scene(
 
 inline void ve_fontcache_backend_test_run_real_text_harfbuzz_scene(
 	ve_fontcache_backend_test_result& result,
-	const ve_fontcache_backend_test_options& options )
+	ve_fontcache_backend_test_options& options )
 {
 	if ( !ve_fontcache_backend_test_require_suite(
 		result,
@@ -5981,11 +6404,6 @@ inline void ve_fontcache_backend_test_run_real_text_harfbuzz_scene(
 			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_RESET
 			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_PRESENT
 			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_HARFBUZZ ) ) {
-		return;
-	}
-
-	if ( options.arabic_font < 0 || options.hebrew_font < 0 ) {
-		ve_fontcache_backend_test_skip( result, "real_text.hb_scene skipped: Arabic/Hebrew font ids not supplied" );
 		return;
 	}
 #ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
@@ -6004,6 +6422,14 @@ inline void ve_fontcache_backend_test_run_real_text_harfbuzz_scene(
 	const float sy = 1.0f / target_h;
 	const ve_fontcache_backend_test_rect top_window = { 200, 640, 1500, 180 };
 	const ve_fontcache_backend_test_rect bottom_window = { 200, 360, 1500, 180 };
+	ve_fontcache_backend_test_prepare_real_text( options );
+	if ( !ve_fontcache_backend_test_require_roles(
+		result,
+		options,
+		"real_text.hb_scene",
+		{ VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_ARABIC, VE_FONTCACHE_BACKEND_TEST_FONT_ROLE_HEBREW } ) ) {
+		return;
+	}
 
 	auto draw_scene = [&]() {
 		ve_fontcache_backend_test_reset_state( options );
@@ -6061,7 +6487,7 @@ inline void ve_fontcache_backend_test_run_real_text_harfbuzz_scene(
 
 inline void ve_fontcache_backend_test_run_full_demo_frame_smoke(
 	ve_fontcache_backend_test_result& result,
-	const ve_fontcache_backend_test_options& options )
+	ve_fontcache_backend_test_options& options )
 {
 	if ( !ve_fontcache_backend_test_require_suite(
 		result,
@@ -6146,7 +6572,7 @@ inline void ve_fontcache_backend_test_run_pipeline_suites(
 
 inline void ve_fontcache_backend_test_run_real_text_suites(
 	ve_fontcache_backend_test_result& result,
-	const ve_fontcache_backend_test_options& options )
+	ve_fontcache_backend_test_options& options )
 {
 	ve_fontcache_backend_test_run_real_text_cached_glyph_orientation( result, options );
 	ve_fontcache_backend_test_run_real_text_uncached_glyph_orientation( result, options );
@@ -6159,7 +6585,7 @@ inline void ve_fontcache_backend_test_run_real_text_suites(
 
 inline void ve_fontcache_backend_test_run_synthetic_suites(
 	ve_fontcache_backend_test_result& result,
-	const ve_fontcache_backend_test_options& options )
+	ve_fontcache_backend_test_options& options )
 {
 	ve_fontcache_backend_test_run_surface_roundtrip( result, options );
 	ve_fontcache_backend_test_run_surface_contract( result, options );
@@ -6176,19 +6602,17 @@ inline ve_fontcache_backend_test_result ve_fontcache_backend_test_run( const ve_
 		return result;
 	}
 
-	ve_fontcache_backend_test_expect( result, options.font >= 0, "backend test received a primary font" );
-	if ( options.font < 0 ) {
-		return result;
-	}
+	ve_fontcache_backend_test_options resolved_options = ve_fontcache_backend_test_resolve_font_roles( options );
 
-	ve_fontcache_backend_test_run_structural_checks( result, options );
-	ve_fontcache_backend_test_run_caching_checks( result, options );
-	ve_fontcache_backend_test_run_readback_checks( result, options );
-	ve_fontcache_backend_test_run_region_checks( result, options );
-	ve_fontcache_backend_test_run_lru_checks( result, options );
-	ve_fontcache_backend_test_run_edge_case_checks( result, options );
-	ve_fontcache_backend_test_run_reload_checks( result, options );
-	ve_fontcache_backend_test_run_synthetic_suites( result, options );
+	ve_fontcache_backend_test_run_structural_checks( result, resolved_options );
+	ve_fontcache_backend_test_run_caching_checks( result, resolved_options );
+	ve_fontcache_backend_test_run_readback_checks( result, resolved_options );
+	ve_fontcache_backend_test_run_region_checks( result, resolved_options );
+	ve_fontcache_backend_test_run_lru_checks( result, resolved_options );
+	ve_fontcache_backend_test_run_edge_case_checks( result, resolved_options );
+	ve_fontcache_backend_test_run_reload_checks( result, resolved_options );
+	ve_fontcache_backend_test_run_synthetic_suites( result, resolved_options );
+	ve_fontcache_backend_test_finalise_state( resolved_options );
 
 	return result;
 }
