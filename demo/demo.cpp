@@ -1197,7 +1197,10 @@ static int run_backend_test_mode()
 			if ( !use_freetype ) {
 				apply_font_fallbacks();
 			}
-			ve_font_id refreshed_huge_font = -1;
+			ve_font_id refreshed_huge_font = load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", huge_buffer, 200.0f );
+			if ( refreshed_huge_font < 0 && !use_freetype ) {
+				refreshed_huge_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", huge_buffer, 200.0f );
+			}
 			normalize_demo_font_ids( &refreshed_huge_font );
 			clear_backend_test_surfaces( true );
 		};

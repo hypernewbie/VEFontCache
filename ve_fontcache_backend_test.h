@@ -563,6 +563,47 @@ inline ve_fontcache_backend_test_rect ve_fontcache_backend_test_inset_rect( cons
 	};
 }
 
+inline ve_fontcache_backend_test_rect ve_fontcache_backend_test_expand_rect( const ve_fontcache_backend_test_rect& rect, int padding )
+{
+	return {
+		rect.x - padding,
+		rect.y - padding,
+		rect.w + 2 * padding,
+		rect.h + 2 * padding,
+	};
+}
+
+inline ve_fontcache_backend_test_rect ve_fontcache_backend_test_clamp_rect(
+	const ve_fontcache_backend_test_rect& rect,
+	int width,
+	int height )
+{
+	const int x0 = std::clamp( rect.x, 0, width );
+	const int y0 = std::clamp( rect.y, 0, height );
+	const int x1 = std::clamp( rect.x + rect.w, 0, width );
+	const int y1 = std::clamp( rect.y + rect.h, 0, height );
+	return { x0, y0, std::max( 0, x1 - x0 ), std::max( 0, y1 - y0 ) };
+}
+
+inline ve_fontcache_backend_test_rect ve_fontcache_backend_test_normalized_bounds_to_rect(
+	double min_x,
+	double min_y,
+	double max_x,
+	double max_y,
+	int width,
+	int height )
+{
+	if ( !( min_x < max_x ) || !( min_y < max_y ) ) {
+		return {};
+	}
+
+	const int x0 = static_cast< int >( std::floor( min_x * width ) );
+	const int y0 = static_cast< int >( std::floor( min_y * height ) );
+	const int x1 = static_cast< int >( std::ceil( max_x * width ) );
+	const int y1 = static_cast< int >( std::ceil( max_y * height ) );
+	return ve_fontcache_backend_test_clamp_rect( { x0, y0, x1 - x0, y1 - y0 }, width, height );
+}
+
 inline int ve_fontcache_backend_test_target_width( const ve_fontcache* cache )
 {
 	return cache && cache->snap_width ? static_cast< int >( cache->snap_width ) : 1920;
@@ -619,6 +660,255 @@ inline bool ve_fontcache_backend_test_surface_extent(
 	return false;
 }
 
+struct ve_fontcache_backend_test_real_glyph_sample
+{
+	bool valid = false;
+	uint32_t pass = 0;
+	ve_fontcache_backend_test_rect source_rect;
+	ve_fontcache_backend_test_rect dest_rect;
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+	uint32_t atlas_page = 0;
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
+};
+
+struct ve_fontcache_backend_test_real_glyph_observation
+{
+	bool ok = false;
+	bool compare_valid = false;
+	bool asymmetric = false;
+	bool vertical_flip = false;
+	bool horizontal_flip = false;
+	ve_fontcache_backend_test_rect presented_read_rect;
+	ve_fontcache_backend_test_bbox source_bbox;
+	ve_fontcache_backend_test_bbox presented_bbox;
+	ve_fontcache_backend_test_center_of_mass source_center;
+	ve_fontcache_backend_test_center_of_mass presented_center;
+	ve_fontcache_backend_test_diff_stats diff;
+	ve_fontcache_backend_test_mirror_scores mirror_scores;
+	ve_fontcache_backend_test_mirror_scores source_symmetry_scores;
+};
+
+inline std::vector< uint8_t > ve_fontcache_backend_test_make_normalized_quadrant_summary(
+	const std::array< double, 4 >& quadrants );
+inline std::vector< uint8_t > ve_fontcache_backend_test_make_normalized_quadrant_summary(
+	const std::vector< uint8_t >& pixels,
+	int width,
+	int height,
+	const ve_fontcache_backend_test_rect& rect );
+inline ve_fontcache_backend_test_bbox ve_fontcache_backend_test_translate_bbox(
+	const ve_fontcache_backend_test_bbox& bbox,
+	int dx,
+	int dy );
+inline ve_fontcache_backend_test_center_of_mass ve_fontcache_backend_test_translate_center(
+	const ve_fontcache_backend_test_center_of_mass& center,
+	int dx,
+	int dy );
+inline ve_fontcache_backend_test_bbox ve_fontcache_backend_test_thresholded_bbox(
+	const std::vector< uint8_t >& pixels,
+	int width,
+	int height,
+	uint8_t threshold );
+inline std::vector< uint8_t > ve_fontcache_backend_test_box_downsample(
+	const std::vector< uint8_t >& source_pixels,
+	int source_width,
+	int source_height,
+	int dest_width,
+	int dest_height );
+inline std::vector< uint8_t > ve_fontcache_backend_test_copy_rect_pixels(
+	const std::vector< uint8_t >& pixels,
+	int image_width,
+	int image_height,
+	const ve_fontcache_backend_test_rect& rect );
+inline ve_fontcache_backend_test_center_of_mass ve_fontcache_backend_test_center_of_mass_grayscale(
+	const std::vector< uint8_t >& pixels,
+	int width,
+	int height );
+inline ve_fontcache_backend_test_diff_stats ve_fontcache_backend_test_expected_vs_actual_diff(
+	const std::vector< uint8_t >& expected,
+	const std::vector< uint8_t >& actual,
+	int width,
+	int height );
+inline ve_fontcache_backend_test_mirror_scores ve_fontcache_backend_test_mirror_scores_for_expected(
+	const std::vector< uint8_t >& expected,
+	const std::vector< uint8_t >& actual,
+	int width,
+	int height );
+inline bool ve_fontcache_backend_test_is_vertical_flip( const ve_fontcache_backend_test_mirror_scores& scores );
+inline bool ve_fontcache_backend_test_is_horizontal_flip( const ve_fontcache_backend_test_mirror_scores& scores );
+
+inline bool ve_fontcache_backend_test_extract_real_glyph_sample(
+	const ve_fontcache_backend_test_options& options,
+	const ve_fontcache_drawlist& drawlist,
+	uint32_t target_pass,
+	const char* source_surface_name,
+	ve_fontcache_backend_test_real_glyph_sample& sample )
+{
+	int source_width = 0;
+	int source_height = 0;
+	if ( !ve_fontcache_backend_test_surface_extent( options, source_surface_name, source_width, source_height ) ) {
+		return false;
+	}
+
+	const int target_width = ve_fontcache_backend_test_target_width( options.cache );
+	const int target_height = ve_fontcache_backend_test_target_height( options.cache );
+	for ( const ve_fontcache_draw& draw : drawlist.dcalls ) {
+		if ( draw.pass != target_pass || draw.clear_before_draw || draw.end_index <= draw.start_index ) {
+			continue;
+		}
+
+		double min_x = std::numeric_limits< double >::infinity();
+		double min_y = std::numeric_limits< double >::infinity();
+		double max_x = -std::numeric_limits< double >::infinity();
+		double max_y = -std::numeric_limits< double >::infinity();
+		double min_u = std::numeric_limits< double >::infinity();
+		double min_v = std::numeric_limits< double >::infinity();
+		double max_u = -std::numeric_limits< double >::infinity();
+		double max_v = -std::numeric_limits< double >::infinity();
+		for ( uint32_t idx = draw.start_index; idx < draw.end_index; idx++ ) {
+			const ve_fontcache_vertex& vertex = drawlist.vertices[ drawlist.indices[ idx ] ];
+			min_x = std::min( min_x, static_cast< double >( vertex.x ) );
+			min_y = std::min( min_y, static_cast< double >( vertex.y ) );
+			max_x = std::max( max_x, static_cast< double >( vertex.x ) );
+			max_y = std::max( max_y, static_cast< double >( vertex.y ) );
+			min_u = std::min( min_u, static_cast< double >( vertex.u ) );
+			min_v = std::min( min_v, static_cast< double >( vertex.v ) );
+			max_u = std::max( max_u, static_cast< double >( vertex.u ) );
+			max_v = std::max( max_v, static_cast< double >( vertex.v ) );
+		}
+
+		sample.pass = draw.pass;
+		sample.dest_rect = ve_fontcache_backend_test_normalized_bounds_to_rect( min_x, min_y, max_x, max_y, target_width, target_height );
+		sample.source_rect = ve_fontcache_backend_test_normalized_bounds_to_rect( min_u, min_v, max_u, max_v, source_width, source_height );
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+		sample.atlas_page = draw.atlas_page;
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
+		sample.valid = ve_fontcache_backend_test_rect_valid( sample.dest_rect )
+			&& ve_fontcache_backend_test_rect_valid( sample.source_rect );
+		return sample.valid;
+	}
+
+	return false;
+}
+
+inline bool ve_fontcache_backend_test_capture_real_glyph_observation(
+	const ve_fontcache_backend_test_options& options,
+	const char* source_surface_name,
+	const ve_fontcache_backend_test_real_glyph_sample& sample,
+	ve_fontcache_backend_test_real_glyph_observation& observation )
+{
+	observation = {};
+	if ( !sample.valid ) {
+		return false;
+	}
+
+	const int target_width = ve_fontcache_backend_test_target_width( options.cache );
+	const int target_height = ve_fontcache_backend_test_target_height( options.cache );
+	observation.presented_read_rect = ve_fontcache_backend_test_clamp_rect(
+		ve_fontcache_backend_test_expand_rect( sample.dest_rect, 8 ),
+		target_width,
+		target_height );
+	if ( !ve_fontcache_backend_test_rect_valid( observation.presented_read_rect ) ) {
+		return false;
+	}
+
+	std::vector< uint8_t > source_pixels;
+	std::vector< uint8_t > presented_pixels;
+	bool ok = ve_fontcache_backend_test_readback_texture(
+		options,
+		source_surface_name,
+		sample.source_rect.x,
+		sample.source_rect.y,
+		sample.source_rect.w,
+		sample.source_rect.h,
+		source_pixels );
+	ok = ok && ve_fontcache_backend_test_readback_texture(
+		options,
+		ve_fontcache_backend_test_presented_surface_name(),
+		observation.presented_read_rect.x,
+		observation.presented_read_rect.y,
+		observation.presented_read_rect.w,
+		observation.presented_read_rect.h,
+		presented_pixels );
+
+	std::vector< uint8_t > source_mask = source_pixels;
+	std::vector< uint8_t > presented_mask = presented_pixels;
+	for ( uint8_t& pixel : source_mask ) {
+		pixel = pixel >= 8 ? 255 : 0;
+	}
+	for ( uint8_t& pixel : presented_mask ) {
+		pixel = pixel >= 8 ? 255 : 0;
+	}
+
+	const ve_fontcache_backend_test_bbox source_local_bbox =
+		ve_fontcache_backend_test_thresholded_bbox( source_mask, sample.source_rect.w, sample.source_rect.h, 8 );
+	const ve_fontcache_backend_test_bbox presented_local_bbox =
+		ve_fontcache_backend_test_thresholded_bbox( presented_mask, observation.presented_read_rect.w, observation.presented_read_rect.h, 8 );
+	const ve_fontcache_backend_test_rect source_local_rect = ve_fontcache_backend_test_inset_rect(
+		ve_fontcache_backend_test_rect_from_bbox( source_local_bbox ),
+		1 );
+	const ve_fontcache_backend_test_rect presented_local_rect = ve_fontcache_backend_test_inset_rect(
+		ve_fontcache_backend_test_rect_from_bbox( presented_local_bbox ),
+		2 );
+	observation.compare_valid = ve_fontcache_backend_test_rect_valid( source_local_rect )
+		&& ve_fontcache_backend_test_rect_valid( presented_local_rect );
+
+	const std::vector< uint8_t > source_summary = observation.compare_valid
+		? ve_fontcache_backend_test_box_downsample(
+			ve_fontcache_backend_test_copy_rect_pixels( source_mask, sample.source_rect.w, sample.source_rect.h, source_local_rect ),
+			source_local_rect.w,
+			source_local_rect.h,
+			3,
+			3 )
+		: std::vector< uint8_t > {};
+	const std::vector< uint8_t > presented_summary = observation.compare_valid
+		? ve_fontcache_backend_test_box_downsample(
+			ve_fontcache_backend_test_copy_rect_pixels(
+				presented_mask,
+				observation.presented_read_rect.w,
+				observation.presented_read_rect.h,
+				presented_local_rect ),
+			presented_local_rect.w,
+			presented_local_rect.h,
+			3,
+			3 )
+		: std::vector< uint8_t > {};
+
+	observation.source_bbox = ve_fontcache_backend_test_translate_bbox( source_local_bbox, sample.source_rect.x, sample.source_rect.y );
+	observation.presented_bbox = ve_fontcache_backend_test_translate_bbox(
+		presented_local_bbox,
+		observation.presented_read_rect.x,
+		observation.presented_read_rect.y );
+	observation.source_center = ve_fontcache_backend_test_translate_center(
+		ve_fontcache_backend_test_center_of_mass_grayscale( source_mask, sample.source_rect.w, sample.source_rect.h ),
+		sample.source_rect.x,
+		sample.source_rect.y );
+	observation.presented_center = ve_fontcache_backend_test_translate_center(
+		ve_fontcache_backend_test_center_of_mass_grayscale(
+			presented_mask,
+			observation.presented_read_rect.w,
+			observation.presented_read_rect.h ),
+		observation.presented_read_rect.x,
+		observation.presented_read_rect.y );
+
+	if ( observation.compare_valid ) {
+		observation.diff = ve_fontcache_backend_test_expected_vs_actual_diff( source_summary, presented_summary, 3, 3 );
+		observation.mirror_scores = ve_fontcache_backend_test_mirror_scores_for_expected( source_summary, presented_summary, 3, 3 );
+		observation.source_symmetry_scores = ve_fontcache_backend_test_mirror_scores_for_expected( source_summary, source_summary, 3, 3 );
+		observation.vertical_flip = ve_fontcache_backend_test_is_vertical_flip( observation.mirror_scores );
+		observation.horizontal_flip = ve_fontcache_backend_test_is_horizontal_flip( observation.mirror_scores );
+		observation.asymmetric = observation.source_symmetry_scores.horizontal >= 16.0
+			&& observation.source_symmetry_scores.vertical >= 16.0;
+	}
+
+	observation.ok = ok
+		&& ve_fontcache_backend_test_any_non_zero( source_mask )
+		&& ve_fontcache_backend_test_any_non_zero( presented_mask )
+		&& observation.source_bbox.valid
+		&& observation.presented_bbox.valid
+		&& observation.compare_valid;
+	return observation.ok;
+}
+
 inline ve_fontcache_backend_test_bbox ve_fontcache_backend_test_translate_bbox(
 	const ve_fontcache_backend_test_bbox& bbox,
 	int dx,
@@ -671,6 +961,13 @@ inline std::string ve_fontcache_backend_test_format_diff( const ve_fontcache_bac
 		<< ", max=" << static_cast< int >( diff.max_abs_error )
 		<< " at (" << diff.peak_x << "," << diff.peak_y << ")"
 		<< ", differing=" << diff.differing_pixels;
+	return oss.str();
+}
+
+inline std::string ve_fontcache_backend_test_format_codepoint( char32_t codepoint )
+{
+	std::ostringstream oss;
+	oss << std::uppercase << std::hex << static_cast< uint32_t >( codepoint );
 	return oss.str();
 }
 
@@ -810,6 +1107,31 @@ inline std::vector< uint8_t > ve_fontcache_backend_test_box_downsample(
 		}
 	}
 	return downsampled;
+}
+
+inline std::vector< uint8_t > ve_fontcache_backend_test_copy_rect_pixels(
+	const std::vector< uint8_t >& pixels,
+	int image_width,
+	int image_height,
+	const ve_fontcache_backend_test_rect& rect )
+{
+	if ( !ve_fontcache_backend_test_rect_valid( rect ) ) {
+		return {};
+	}
+
+	std::vector< uint8_t > cropped( static_cast< size_t >( rect.w ) * static_cast< size_t >( rect.h ), 0 );
+	for ( int y = 0; y < rect.h; y++ ) {
+		for ( int x = 0; x < rect.w; x++ ) {
+			const int src_x = rect.x + x;
+			const int src_y = rect.y + y;
+			if ( src_x < 0 || src_y < 0 || src_x >= image_width || src_y >= image_height ) {
+				continue;
+			}
+			cropped[ static_cast< size_t >( y ) * rect.w + x ] =
+				pixels[ static_cast< size_t >( src_y ) * image_width + src_x ];
+		}
+	}
+	return cropped;
 }
 
 inline ve_fontcache_backend_test_bbox ve_fontcache_backend_test_thresholded_bbox(
@@ -1713,7 +2035,7 @@ inline void ve_fontcache_backend_test_validate_drawlist(
 					vertex.v >= -0.01f && vertex.v <= 1.01f,
 					"target v stayed near [0, 1]" );
 			}
-		} else if ( seen_target ) {
+		} else if ( seen_target && ve_fontcache_backend_test_is_atlas_update_pass( draw.pass ) ) {
 			ve_fontcache_backend_test_expect( result, false, "atlas updates finished before target draws" );
 		}
 	}
@@ -4778,6 +5100,320 @@ inline void ve_fontcache_backend_test_run_pipeline_end_to_end_freetype(
 			+ "; probable cause: stage-local transform error within the FreeType pipeline" );
 }
 
+inline void ve_fontcache_backend_test_run_real_text_cached_glyph_orientation(
+	ve_fontcache_backend_test_result& result,
+	const ve_fontcache_backend_test_options& options )
+{
+	if ( !ve_fontcache_backend_test_require_suite(
+		result,
+		options,
+		"real_text_cached_glyph_orientation",
+		VE_FONTCACHE_BACKEND_TEST_REQUIRES_GPU
+			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_RESET
+			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_PRESENT
+			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_STB_MODE ) ) {
+		return;
+	}
+
+	const ve_font_id font = options.font;
+	const std::u8string glyph_text = u8"R";
+
+	const int target_w = ve_fontcache_backend_test_target_width( options.cache );
+	const int target_h = ve_fontcache_backend_test_target_height( options.cache );
+	const float sx = 1.0f / target_w;
+	const float sy = 1.0f / target_h;
+	ve_fontcache_backend_test_prepare_real_text( options );
+	ve_fontcache_backend_test_reset_state( options );
+	ve_fontcache_drawlist* drawlist = ve_fontcache_backend_test_draw(
+		result,
+		options.cache,
+		font,
+		glyph_text,
+		false,
+		0.42f,
+		0.44f,
+		sx,
+		sy );
+	ve_fontcache_backend_test_real_glyph_sample sample;
+	bool draw_ok = ve_fontcache_backend_test_extract_real_glyph_sample(
+		options,
+		*drawlist,
+		VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET,
+		"atlas",
+		sample );
+	draw_ok = draw_ok && ve_fontcache_backend_test_execute_pipeline_and_present( options );
+
+	ve_fontcache_backend_test_real_glyph_observation observation;
+	const bool capture_ok = ve_fontcache_backend_test_capture_real_glyph_observation( options, "atlas", sample, observation );
+	const double best_mirror = std::min(
+		std::min( observation.mirror_scores.horizontal, observation.mirror_scores.vertical ),
+		observation.mirror_scores.both );
+	const bool direct_match = observation.diff.mean_abs_error + 8.0 <= best_mirror;
+	const bool scale_error = ve_fontcache_backend_test_is_uniform_scale_error( observation.source_bbox, observation.presented_bbox );
+	const bool aspect_error = ve_fontcache_backend_test_is_aspect_ratio_deformation( observation.source_bbox, observation.presented_bbox );
+	std::string cause = "orientation mismatch in real-text cached glyph path";
+	if ( !draw_ok || !sample.valid ) {
+		cause = "missing atlas-backed draw sample in real-text cached glyph path";
+	} else if ( !capture_ok || !observation.ok ) {
+		cause = "missing atlas or presented glyph data in real-text cached glyph path";
+	} else if ( observation.vertical_flip ) {
+		cause = "V coordinate inversion in real-text cached glyph path";
+	} else if ( observation.horizontal_flip ) {
+		cause = "U coordinate inversion in real-text cached glyph path";
+	} else if ( scale_error ) {
+		cause = "uniform scale drift in real-text cached glyph path";
+	} else if ( aspect_error ) {
+		cause = "aspect-ratio deformation in real-text cached glyph path";
+	} else if ( !direct_match ) {
+		cause = observation.asymmetric
+			? "unexpected distortion in real-text cached glyph path"
+			: "selected atlas-backed glyph was too symmetric for orientation detection";
+	}
+
+	ve_fontcache_backend_test_expect(
+		result,
+		draw_ok
+			&& capture_ok
+			&& observation.ok
+			&& !observation.vertical_flip
+			&& !observation.horizontal_flip
+			&& !scale_error
+			&& !aspect_error
+			&& direct_match,
+		std::string( "real_text_cached_glyph_orientation: glyph=R" )
+			+ ", atlas_bbox=" + ve_fontcache_backend_test_format_bbox( observation.source_bbox )
+			+ ", presented_bbox=" + ve_fontcache_backend_test_format_bbox( observation.presented_bbox )
+			+ ", atlas_centroid=" + ve_fontcache_backend_test_format_center( observation.source_center )
+			+ ", presented_centroid=" + ve_fontcache_backend_test_format_center( observation.presented_center )
+			+ ", diff=" + ve_fontcache_backend_test_format_diff( observation.diff )
+			+ ", mirror_scores={direct=" + std::to_string( observation.mirror_scores.direct )
+			+ ", horizontal=" + std::to_string( observation.mirror_scores.horizontal )
+			+ ", vertical=" + std::to_string( observation.mirror_scores.vertical )
+			+ ", both=" + std::to_string( observation.mirror_scores.both ) + "}"
+			+ ", source_symmetry={horizontal=" + std::to_string( observation.source_symmetry_scores.horizontal )
+			+ ", vertical=" + std::to_string( observation.source_symmetry_scores.vertical ) + "}"
+			+ "; probable cause: " + cause );
+}
+
+inline void ve_fontcache_backend_test_run_real_text_uncached_glyph_orientation(
+	ve_fontcache_backend_test_result& result,
+	const ve_fontcache_backend_test_options& options )
+{
+	if ( !ve_fontcache_backend_test_require_suite(
+		result,
+		options,
+		"real_text_uncached_glyph_orientation",
+		VE_FONTCACHE_BACKEND_TEST_REQUIRES_GPU
+			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_RESET
+			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_PRESENT
+			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_STB_MODE ) ) {
+		return;
+	}
+
+	if ( options.huge_font < 0 ) {
+		ve_fontcache_backend_test_skip( result, "real_text_uncached_glyph_orientation skipped: huge_font not supplied" );
+		return;
+	}
+
+	const int target_w = ve_fontcache_backend_test_target_width( options.cache );
+	const int target_h = ve_fontcache_backend_test_target_height( options.cache );
+	const float sx = 1.0f / target_w;
+	const float sy = 1.0f / target_h;
+	ve_fontcache_backend_test_prepare_real_text( options );
+	ve_fontcache_backend_test_reset_state( options );
+	ve_fontcache_drawlist* drawlist = ve_fontcache_backend_test_draw(
+		result,
+		options.cache,
+		options.huge_font,
+		u8"R",
+		false,
+		0.32f,
+		0.34f,
+		sx,
+		sy );
+	bool seen_uncached_target = false;
+	drawlist->dcalls.erase(
+		std::remove_if(
+			drawlist->dcalls.begin(),
+			drawlist->dcalls.end(),
+			[&seen_uncached_target]( const ve_fontcache_draw& draw ) {
+				if ( draw.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_UNCACHED && draw.end_index > draw.start_index ) {
+					seen_uncached_target = true;
+					return false;
+				}
+				return seen_uncached_target
+					&& draw.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH
+					&& draw.clear_before_draw
+					&& draw.end_index == draw.start_index;
+			} ),
+		drawlist->dcalls.end() );
+
+	ve_fontcache_backend_test_real_glyph_sample sample;
+	bool draw_ok = ve_fontcache_backend_test_extract_real_glyph_sample(
+		options,
+		*drawlist,
+		VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_UNCACHED,
+		"glyph_buffer",
+		sample );
+	draw_ok = draw_ok && ve_fontcache_backend_test_execute_pipeline_and_present( options );
+
+	ve_fontcache_backend_test_real_glyph_observation observation;
+	const bool capture_ok = ve_fontcache_backend_test_capture_real_glyph_observation( options, "glyph_buffer", sample, observation );
+	const double best_mirror = std::min(
+		std::min( observation.mirror_scores.horizontal, observation.mirror_scores.vertical ),
+		observation.mirror_scores.both );
+	const bool direct_match = observation.diff.mean_abs_error + 8.0 <= best_mirror;
+	std::string cause = "orientation mismatch in real-text uncached glyph path";
+	if ( !draw_ok || !sample.valid ) {
+		cause = "missing glyph-buffer draw sample in real-text uncached glyph path";
+	} else if ( !capture_ok || !observation.ok ) {
+		cause = "missing glyph-buffer or presented glyph data in real-text uncached glyph path";
+	} else if ( observation.vertical_flip ) {
+		cause = "V coordinate inversion in real-text uncached glyph path";
+	} else if ( observation.horizontal_flip ) {
+		cause = "U coordinate inversion in real-text uncached glyph path";
+	} else if ( !direct_match ) {
+		cause = observation.asymmetric
+			? "unexpected distortion in real-text uncached glyph path"
+			: "selected uncached glyph was too symmetric for orientation detection";
+	}
+
+	ve_fontcache_backend_test_expect(
+		result,
+		draw_ok
+			&& capture_ok
+			&& observation.ok
+			&& !observation.vertical_flip
+			&& !observation.horizontal_flip
+			&& direct_match,
+		"real_text_uncached_glyph_orientation: glyph_buffer_bbox=" + ve_fontcache_backend_test_format_bbox( observation.source_bbox )
+			+ ", presented_bbox=" + ve_fontcache_backend_test_format_bbox( observation.presented_bbox )
+			+ ", glyph_buffer_centroid=" + ve_fontcache_backend_test_format_center( observation.source_center )
+			+ ", presented_centroid=" + ve_fontcache_backend_test_format_center( observation.presented_center )
+			+ ", diff=" + ve_fontcache_backend_test_format_diff( observation.diff )
+			+ ", mirror_scores={direct=" + std::to_string( observation.mirror_scores.direct )
+			+ ", horizontal=" + std::to_string( observation.mirror_scores.horizontal )
+			+ ", vertical=" + std::to_string( observation.mirror_scores.vertical )
+			+ ", both=" + std::to_string( observation.mirror_scores.both ) + "}"
+			+ ", source_symmetry={horizontal=" + std::to_string( observation.source_symmetry_scores.horizontal )
+			+ ", vertical=" + std::to_string( observation.source_symmetry_scores.vertical ) + "}"
+			+ "; probable cause: " + cause );
+}
+
+inline void ve_fontcache_backend_test_run_real_text_cpu_cached_glyph_orientation(
+	ve_fontcache_backend_test_result& result,
+	const ve_fontcache_backend_test_options& options )
+{
+	if ( !ve_fontcache_backend_test_require_suite(
+		result,
+		options,
+		"real_text_cpu_cached_glyph_orientation",
+		VE_FONTCACHE_BACKEND_TEST_REQUIRES_GPU
+			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_RESET
+			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_PRESENT
+			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_FREETYPE_MODE
+			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_CPU_ATLAS ) ) {
+		return;
+	}
+
+	const ve_font_id font = options.font;
+	const std::u8string glyph_text = u8"R";
+
+	const int target_w = ve_fontcache_backend_test_target_width( options.cache );
+	const int target_h = ve_fontcache_backend_test_target_height( options.cache );
+	const float sx = 1.0f / target_w;
+	const float sy = 1.0f / target_h;
+	ve_fontcache_backend_test_prepare_real_text( options );
+	ve_fontcache_backend_test_reset_state( options );
+	ve_fontcache_drawlist* drawlist = ve_fontcache_backend_test_draw(
+		result,
+		options.cache,
+		font,
+		glyph_text,
+		false,
+		0.42f,
+		0.44f,
+		sx,
+		sy );
+	ve_fontcache_backend_test_real_glyph_sample sample;
+	bool draw_ok = ve_fontcache_backend_test_extract_real_glyph_sample(
+		options,
+		*drawlist,
+		VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_CPU_CACHED,
+		ve_fontcache_backend_test_cpu_atlas_page_surface_name(),
+		sample );
+	draw_ok = draw_ok && ve_fontcache_backend_test_execute_pipeline_and_present( options );
+	const bool page_zero = sample.valid
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+		&& sample.atlas_page == 0
+#else
+		&& true
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
+		;
+
+	ve_fontcache_backend_test_real_glyph_observation observation;
+	const bool capture_ok = page_zero
+		&& ve_fontcache_backend_test_capture_real_glyph_observation(
+			options,
+			ve_fontcache_backend_test_cpu_atlas_page_surface_name(),
+			sample,
+			observation );
+	const double best_mirror = std::min(
+		std::min( observation.mirror_scores.horizontal, observation.mirror_scores.vertical ),
+		observation.mirror_scores.both );
+	const bool direct_match = observation.diff.mean_abs_error + 8.0 <= best_mirror;
+	const bool scale_error = ve_fontcache_backend_test_is_uniform_scale_error( observation.source_bbox, observation.presented_bbox );
+	const bool aspect_error = ve_fontcache_backend_test_is_aspect_ratio_deformation( observation.source_bbox, observation.presented_bbox );
+	std::string cause = "orientation mismatch in real-text CPU-cached glyph path";
+	if ( !draw_ok || !sample.valid ) {
+		cause = "missing CPU-atlas draw sample in real-text CPU-cached glyph path";
+	} else if ( !page_zero ) {
+		cause = "glyph uploaded to a CPU atlas page other than page 0";
+	} else if ( !capture_ok || !observation.ok ) {
+		cause = "missing CPU atlas or presented glyph data in real-text CPU-cached glyph path";
+	} else if ( observation.vertical_flip ) {
+		cause = "V coordinate inversion in real-text CPU-cached glyph path";
+	} else if ( observation.horizontal_flip ) {
+		cause = "U coordinate inversion in real-text CPU-cached glyph path";
+	} else if ( scale_error ) {
+		cause = "uniform scale drift in real-text CPU-cached glyph path";
+	} else if ( aspect_error ) {
+		cause = "aspect-ratio deformation in real-text CPU-cached glyph path";
+	} else if ( !direct_match ) {
+		cause = observation.asymmetric
+			? "unexpected distortion in real-text CPU-cached glyph path"
+			: "selected CPU-cached glyph was too symmetric for orientation detection";
+	}
+
+	ve_fontcache_backend_test_expect(
+		result,
+		draw_ok
+			&& page_zero
+			&& capture_ok
+			&& observation.ok
+			&& !observation.vertical_flip
+			&& !observation.horizontal_flip
+			&& !scale_error
+			&& !aspect_error
+			&& direct_match,
+		std::string( "real_text_cpu_cached_glyph_orientation: glyph=R" )
+			+ ", cpu_atlas_bbox=" + ve_fontcache_backend_test_format_bbox( observation.source_bbox )
+			+ ", presented_bbox=" + ve_fontcache_backend_test_format_bbox( observation.presented_bbox )
+			+ ", cpu_atlas_centroid=" + ve_fontcache_backend_test_format_center( observation.source_center )
+			+ ", presented_centroid=" + ve_fontcache_backend_test_format_center( observation.presented_center )
+			+ ", diff=" + ve_fontcache_backend_test_format_diff( observation.diff )
+			+ ", mirror_scores={direct=" + std::to_string( observation.mirror_scores.direct )
+			+ ", horizontal=" + std::to_string( observation.mirror_scores.horizontal )
+			+ ", vertical=" + std::to_string( observation.mirror_scores.vertical )
+			+ ", both=" + std::to_string( observation.mirror_scores.both ) + "}"
+			+ ", source_symmetry={horizontal=" + std::to_string( observation.source_symmetry_scores.horizontal )
+			+ ", vertical=" + std::to_string( observation.source_symmetry_scores.vertical ) + "}"
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+			+ ", atlas_page=" + std::to_string( sample.atlas_page )
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
+			+ "; probable cause: " + cause );
+}
+
 inline void ve_fontcache_backend_test_run_real_text_micro_scene(
 	ve_fontcache_backend_test_result& result,
 	const ve_fontcache_backend_test_options& options )
@@ -5055,6 +5691,9 @@ inline void ve_fontcache_backend_test_run_real_text_suites(
 	ve_fontcache_backend_test_result& result,
 	const ve_fontcache_backend_test_options& options )
 {
+	ve_fontcache_backend_test_run_real_text_cached_glyph_orientation( result, options );
+	ve_fontcache_backend_test_run_real_text_uncached_glyph_orientation( result, options );
+	ve_fontcache_backend_test_run_real_text_cpu_cached_glyph_orientation( result, options );
 	ve_fontcache_backend_test_run_real_text_micro_scene( result, options );
 	ve_fontcache_backend_test_run_real_text_harfbuzz_scene( result, options );
 	ve_fontcache_backend_test_run_full_demo_frame_smoke( result, options );
