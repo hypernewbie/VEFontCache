@@ -933,6 +933,13 @@ static void vrhi_upload_greyscale_rect_to_r8_texture( vhTexture texture, int tex
     vrhi_upload_rect_via_blit( texture, nvrhi::Format::R8_UNORM, x, dst_y_top_left, w, h, r8_pixels );
 }
 
+static void vrhi_upload_top_left_greyscale_rect_to_r8_texture( vhTexture texture, int texture_height, int x, int y, int w, int h, const uint8_t* pixels )
+{
+    const int dst_y_top_left = vrhi_bottom_left_to_top_left_y( texture_height, y, h );
+    std::vector< uint8_t > r8_pixels( pixels, pixels + static_cast< size_t >( w ) * static_cast< size_t >( h ) );
+    vrhi_upload_rect_via_blit( texture, nvrhi::Format::R8_UNORM, x, dst_y_top_left, w, h, r8_pixels );
+}
+
 static bool vrhi_readback_texture_region( vhTexture texture, nvrhi::Format format, int texture_width, int texture_height, int x, int y, int w, int h, uint8_t* out_pixels )
 {
     if ( !vrhi_is_valid( texture ) || !out_pixels || x < 0 || y < 0 || w <= 0 || h <= 0 ) {
@@ -1053,7 +1060,7 @@ static void fontcache_drawcmd()
         } else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_UPLOAD ) {
             vrhi_ensure_cpu_atlas_page( dcall.atlas_page );
             const uint8_t* texels = &drawlist->texels[ dcall.texel_offset ];
-            vrhi_upload_greyscale_rect_to_r8_texture(
+            vrhi_upload_top_left_greyscale_rect_to_r8_texture(
                 g_cpu_atlas_pages[ dcall.atlas_page ].texture,
                 VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE,
                 static_cast< int >( dcall.upload_region_x ),

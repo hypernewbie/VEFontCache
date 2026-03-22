@@ -688,6 +688,41 @@ struct ve_fontcache_backend_test_real_glyph_observation
 	ve_fontcache_backend_test_mirror_scores source_symmetry_scores;
 };
 
+struct ve_fontcache_backend_test_canonical_glyph_mask
+{
+	bool ok = false;
+	bool compare_valid = false;
+	ve_font_id font = -1;
+	char32_t codepoint = 0;
+	int bitmap_box_x0 = 0;
+	int bitmap_box_y0 = 0;
+	int bitmap_box_x1 = 0;
+	int bitmap_box_y1 = 0;
+	int width = 0;
+	int height = 0;
+	ve_fontcache_backend_test_rect compare_rect;
+	ve_fontcache_backend_test_bbox bbox;
+	ve_fontcache_backend_test_center_of_mass center;
+	std::vector< uint8_t > mask;
+	std::vector< uint8_t > summary;
+};
+
+struct ve_fontcache_backend_test_presented_glyph_mask
+{
+	bool ok = false;
+	bool compare_valid = false;
+	ve_font_id font = -1;
+	char32_t codepoint = 0;
+	uint32_t target_pass = 0;
+	ve_fontcache_backend_test_rect draw_rect;
+	ve_fontcache_backend_test_rect read_rect;
+	ve_fontcache_backend_test_rect compare_rect;
+	ve_fontcache_backend_test_bbox bbox;
+	ve_fontcache_backend_test_center_of_mass center;
+	std::vector< uint8_t > mask;
+	std::vector< uint8_t > summary;
+};
+
 inline std::vector< uint8_t > ve_fontcache_backend_test_make_normalized_quadrant_summary(
 	const std::array< double, 4 >& quadrants );
 inline std::vector< uint8_t > ve_fontcache_backend_test_make_normalized_quadrant_summary(
@@ -735,6 +770,37 @@ inline ve_fontcache_backend_test_mirror_scores ve_fontcache_backend_test_mirror_
 	int height );
 inline bool ve_fontcache_backend_test_is_vertical_flip( const ve_fontcache_backend_test_mirror_scores& scores );
 inline bool ve_fontcache_backend_test_is_horizontal_flip( const ve_fontcache_backend_test_mirror_scores& scores );
+inline std::vector< uint8_t > ve_fontcache_backend_test_flip_vertical(
+	const std::vector< uint8_t >& pixels,
+	int width,
+	int height );
+inline ve_fontcache_drawlist* ve_fontcache_backend_test_draw(
+	ve_fontcache_backend_test_result& result,
+	ve_fontcache* cache,
+	ve_font_id font,
+	const std::u8string& text,
+	bool shape_cache,
+	float posx,
+	float posy,
+	float scalex,
+	float scaley );
+inline void ve_fontcache_backend_test_reset_state( const ve_fontcache_backend_test_options& options );
+inline bool ve_fontcache_backend_test_execute_pipeline_and_present( const ve_fontcache_backend_test_options& options );
+inline bool ve_fontcache_backend_test_rasterize_canonical_glyph(
+	ve_fontcache* cache,
+	ve_font_id font,
+	char32_t codepoint,
+	ve_fontcache_backend_test_canonical_glyph_mask& mask );
+inline bool ve_fontcache_backend_test_capture_presented_glyph_mask(
+	ve_fontcache_backend_test_result& result,
+	const ve_fontcache_backend_test_options& options,
+	ve_font_id font,
+	char32_t codepoint,
+	float posx,
+	float posy,
+	float scalex,
+	float scaley,
+	ve_fontcache_backend_test_presented_glyph_mask& mask );
 
 inline bool ve_fontcache_backend_test_extract_real_glyph_sample(
 	const ve_fontcache_backend_test_options& options,
@@ -907,6 +973,212 @@ inline bool ve_fontcache_backend_test_capture_real_glyph_observation(
 		&& observation.presented_bbox.valid
 		&& observation.compare_valid;
 	return observation.ok;
+}
+
+inline bool ve_fontcache_backend_test_rasterize_canonical_glyph(
+	ve_fontcache* cache,
+	ve_font_id font,
+	char32_t codepoint,
+	ve_fontcache_backend_test_canonical_glyph_mask& mask )
+{
+	mask = {};
+	mask.font = font;
+	mask.codepoint = codepoint;
+	if ( !cache || !ve_fontcache_is_valid_font_id( cache, font ) ) {
+		return false;
+	}
+
+	ve_fontcache_entry& entry = cache->entry[ font ];
+	const ve_glyph glyph = ve_fontcache_backend_test_find_glyph( cache, font, codepoint );
+	if ( !glyph || stbtt_IsGlyphEmpty( &entry.info, glyph ) ) {
+		return false;
+	}
+
+	int x0 = 0;
+	int y0 = 0;
+	int x1 = 0;
+	int y1 = 0;
+	stbtt_GetGlyphBitmapBoxSubpixel(
+		&entry.info,
+		glyph,
+		entry.size_scale,
+		entry.size_scale,
+		0.0f,
+		0.0f,
+		&x0,
+		&y0,
+		&x1,
+		&y1 );
+	const int width = std::max( 0, x1 - x0 );
+	const int height = std::max( 0, y1 - y0 );
+	if ( width <= 0 || height <= 0 ) {
+		return false;
+	}
+
+	std::vector< uint8_t > canonical_top_left( static_cast< size_t >( width ) * static_cast< size_t >( height ), 0 );
+	stbtt_MakeGlyphBitmapSubpixel(
+		&entry.info,
+		canonical_top_left.data(),
+		width,
+		height,
+		width,
+		entry.size_scale,
+		entry.size_scale,
+		0.0f,
+		0.0f,
+		glyph );
+
+	mask.width = width;
+	mask.height = height;
+	mask.bitmap_box_x0 = x0;
+	mask.bitmap_box_y0 = y0;
+	mask.bitmap_box_x1 = x1;
+	mask.bitmap_box_y1 = y1;
+	mask.mask = ve_fontcache_backend_test_flip_vertical( canonical_top_left, width, height );
+	for ( uint8_t& pixel : mask.mask ) {
+		pixel = pixel >= 8 ? 255 : 0;
+	}
+
+	const ve_fontcache_backend_test_bbox local_bbox =
+		ve_fontcache_backend_test_thresholded_bbox( mask.mask, width, height, 8 );
+	mask.bbox = local_bbox;
+	mask.compare_rect = ve_fontcache_backend_test_inset_rect(
+		ve_fontcache_backend_test_rect_from_bbox( local_bbox ),
+		1 );
+	mask.compare_valid = ve_fontcache_backend_test_rect_valid( mask.compare_rect );
+	mask.center = ve_fontcache_backend_test_center_of_mass_grayscale( mask.mask, width, height );
+	if ( mask.compare_valid ) {
+		mask.summary = ve_fontcache_backend_test_box_downsample(
+			ve_fontcache_backend_test_copy_rect_pixels( mask.mask, width, height, mask.compare_rect ),
+			mask.compare_rect.w,
+			mask.compare_rect.h,
+			3,
+			3 );
+	}
+
+	mask.ok = ve_fontcache_backend_test_any_non_zero( mask.mask )
+		&& mask.bbox.valid
+		&& mask.compare_valid;
+	return mask.ok;
+}
+
+inline bool ve_fontcache_backend_test_capture_presented_glyph_mask(
+	ve_fontcache_backend_test_result& result,
+	const ve_fontcache_backend_test_options& options,
+	ve_font_id font,
+	char32_t codepoint,
+	float posx,
+	float posy,
+	float scalex,
+	float scaley,
+	ve_fontcache_backend_test_presented_glyph_mask& mask )
+{
+	mask = {};
+	mask.font = font;
+	mask.codepoint = codepoint;
+	if ( !options.cache || !ve_fontcache_is_valid_font_id( options.cache, font ) ) {
+		return false;
+	}
+
+	ve_fontcache_backend_test_reset_state( options );
+	ve_fontcache_drawlist* drawlist = ve_fontcache_backend_test_draw(
+		result,
+		options.cache,
+		font,
+		ve_fontcache_backend_test_codepoint_to_utf8( codepoint ),
+		false,
+		posx,
+		posy,
+		scalex,
+		scaley );
+
+	uint32_t target_pass = 0;
+	for ( const ve_fontcache_draw& draw : drawlist->dcalls ) {
+		if ( ve_fontcache_backend_test_is_target_pass( draw.pass )
+			&& !draw.clear_before_draw
+			&& draw.end_index > draw.start_index ) {
+			target_pass = draw.pass;
+			break;
+		}
+	}
+
+	const char* source_surface_name = nullptr;
+	if ( target_pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET ) {
+		source_surface_name = "atlas";
+	} else if ( target_pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_UNCACHED ) {
+		source_surface_name = "glyph_buffer";
+	}
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+	else if ( target_pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_CPU_CACHED ) {
+		source_surface_name = ve_fontcache_backend_test_cpu_atlas_page_surface_name();
+	}
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
+
+	ve_fontcache_backend_test_real_glyph_sample sample;
+	bool ok = target_pass != 0
+		&& source_surface_name != nullptr
+		&& ve_fontcache_backend_test_extract_real_glyph_sample(
+			options,
+			*drawlist,
+			target_pass,
+			source_surface_name,
+			sample );
+	ok = ok && ve_fontcache_backend_test_execute_pipeline_and_present( options );
+	if ( !ok || !sample.valid ) {
+		return false;
+	}
+
+	mask.target_pass = target_pass;
+	mask.draw_rect = sample.dest_rect;
+	mask.read_rect = ve_fontcache_backend_test_clamp_rect(
+		ve_fontcache_backend_test_expand_rect( sample.dest_rect, 8 ),
+		ve_fontcache_backend_test_target_width( options.cache ),
+		ve_fontcache_backend_test_target_height( options.cache ) );
+	if ( !ve_fontcache_backend_test_rect_valid( mask.read_rect ) ) {
+		return false;
+	}
+
+	ok = ve_fontcache_backend_test_readback_texture(
+		options,
+		ve_fontcache_backend_test_presented_surface_name(),
+		mask.read_rect.x,
+		mask.read_rect.y,
+		mask.read_rect.w,
+		mask.read_rect.h,
+		mask.mask );
+	if ( !ok ) {
+		mask.mask.clear();
+		return false;
+	}
+
+	for ( uint8_t& pixel : mask.mask ) {
+		pixel = pixel >= 8 ? 255 : 0;
+	}
+
+	const ve_fontcache_backend_test_bbox local_bbox =
+		ve_fontcache_backend_test_thresholded_bbox( mask.mask, mask.read_rect.w, mask.read_rect.h, 8 );
+	mask.bbox = ve_fontcache_backend_test_translate_bbox( local_bbox, mask.read_rect.x, mask.read_rect.y );
+	mask.compare_rect = ve_fontcache_backend_test_inset_rect(
+		ve_fontcache_backend_test_rect_from_bbox( local_bbox ),
+		2 );
+	mask.compare_valid = ve_fontcache_backend_test_rect_valid( mask.compare_rect );
+	mask.center = ve_fontcache_backend_test_translate_center(
+		ve_fontcache_backend_test_center_of_mass_grayscale( mask.mask, mask.read_rect.w, mask.read_rect.h ),
+		mask.read_rect.x,
+		mask.read_rect.y );
+	if ( mask.compare_valid ) {
+		mask.summary = ve_fontcache_backend_test_box_downsample(
+			ve_fontcache_backend_test_copy_rect_pixels( mask.mask, mask.read_rect.w, mask.read_rect.h, mask.compare_rect ),
+			mask.compare_rect.w,
+			mask.compare_rect.h,
+			3,
+			3 );
+	}
+
+	mask.ok = ve_fontcache_backend_test_any_non_zero( mask.mask )
+		&& mask.bbox.valid
+		&& mask.compare_valid;
+	return mask.ok;
 }
 
 inline ve_fontcache_backend_test_bbox ve_fontcache_backend_test_translate_bbox(
@@ -5414,6 +5686,186 @@ inline void ve_fontcache_backend_test_run_real_text_cpu_cached_glyph_orientation
 			+ "; probable cause: " + cause );
 }
 
+inline void ve_fontcache_backend_test_run_real_text_canonical_glyph_orientation(
+	ve_fontcache_backend_test_result& result,
+	const ve_fontcache_backend_test_options& options )
+{
+	if ( !ve_fontcache_backend_test_require_suite(
+		result,
+		options,
+		"real_text_canonical_glyph_orientation",
+		VE_FONTCACHE_BACKEND_TEST_REQUIRES_GPU
+			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_RESET
+			| VE_FONTCACHE_BACKEND_TEST_REQUIRES_PRESENT ) ) {
+		return;
+	}
+
+	ve_fontcache_backend_test_prepare_real_text( options );
+
+	const int target_w = ve_fontcache_backend_test_target_width( options.cache );
+	const int target_h = ve_fontcache_backend_test_target_height( options.cache );
+	const float sx = 1.0f / target_w;
+	const float sy = 1.0f / target_h;
+
+	struct glyph_case
+	{
+		char32_t codepoint = 0;
+		const char* label = "";
+		std::array< ve_font_id, 5 > candidate_fonts {};
+	};
+
+	const glyph_case cases[] = {
+		{ U'R', "R", { options.latin_font, options.secondary_font, options.font, options.small_font, options.huge_font } },
+		{ U'ゑ', "U+3091", { options.font, options.cjk_font, options.huge_font, options.secondary_font, options.latin_font } },
+	};
+
+	auto pick_font_for_codepoint = [&]( const glyph_case& current ) -> ve_font_id {
+		for ( ve_font_id candidate_font : current.candidate_fonts ) {
+			if ( !ve_fontcache_is_valid_font_id( options.cache, candidate_font ) ) {
+				continue;
+			}
+			if ( ve_fontcache_backend_test_find_glyph( options.cache, candidate_font, current.codepoint ) != 0 ) {
+				return candidate_font;
+			}
+		}
+		return -1;
+	};
+
+	bool any_case_ran = false;
+	bool informative_case_seen = false;
+	bool all_cases_ok = true;
+	std::ostringstream details;
+	for ( const glyph_case& current : cases ) {
+		if ( details.tellp() > 0 ) {
+			details << " | ";
+		}
+
+		const ve_font_id font = pick_font_for_codepoint( current );
+		if ( font < 0 ) {
+			details << current.label << "(U+" << ve_fontcache_backend_test_format_codepoint( current.codepoint )
+				<< "): missing glyph in supplied fonts";
+			continue;
+		}
+
+		any_case_ran = true;
+		ve_fontcache_backend_test_canonical_glyph_mask canonical;
+		ve_fontcache_backend_test_presented_glyph_mask presented;
+		const bool canonical_ok = ve_fontcache_backend_test_rasterize_canonical_glyph(
+			options.cache,
+			font,
+			current.codepoint,
+			canonical );
+		const bool presented_ok = ve_fontcache_backend_test_capture_presented_glyph_mask(
+			result,
+			options,
+			font,
+			current.codepoint,
+			0.42f,
+			0.44f,
+			sx,
+			sy,
+			presented );
+
+		ve_fontcache_backend_test_diff_stats diff;
+		ve_fontcache_backend_test_mirror_scores mirror_scores;
+		ve_fontcache_backend_test_mirror_scores symmetry_scores;
+		bool vertical_flip = false;
+		bool horizontal_flip = false;
+		bool vertical_informative = false;
+		bool horizontal_informative = false;
+		bool axis_informative = false;
+		bool direct_beats_mirror = true;
+		bool large_direct_diff = false;
+		if ( canonical_ok && presented_ok ) {
+			diff = ve_fontcache_backend_test_expected_vs_actual_diff( canonical.summary, presented.summary, 3, 3 );
+			mirror_scores = ve_fontcache_backend_test_mirror_scores_for_expected( canonical.summary, presented.summary, 3, 3 );
+			symmetry_scores = ve_fontcache_backend_test_mirror_scores_for_expected( canonical.summary, canonical.summary, 3, 3 );
+			horizontal_informative = symmetry_scores.horizontal >= 16.0;
+			vertical_informative = symmetry_scores.vertical >= 16.0;
+			axis_informative = horizontal_informative || vertical_informative;
+			horizontal_flip = horizontal_informative && ve_fontcache_backend_test_is_horizontal_flip( mirror_scores );
+			vertical_flip = vertical_informative && ve_fontcache_backend_test_is_vertical_flip( mirror_scores );
+			double best_relevant_mirror = std::numeric_limits< double >::infinity();
+			if ( horizontal_informative ) {
+				best_relevant_mirror = std::min( best_relevant_mirror, mirror_scores.horizontal );
+			}
+			if ( vertical_informative ) {
+				best_relevant_mirror = std::min( best_relevant_mirror, mirror_scores.vertical );
+			}
+			if ( horizontal_informative && vertical_informative ) {
+				best_relevant_mirror = std::min( best_relevant_mirror, mirror_scores.both );
+			}
+			if ( std::isfinite( best_relevant_mirror ) ) {
+				direct_beats_mirror = diff.mean_abs_error + 8.0 <= best_relevant_mirror;
+			}
+			large_direct_diff = diff.mean_abs_error > 72.0 || diff.max_abs_error > 224;
+			informative_case_seen = informative_case_seen || axis_informative;
+		}
+
+		std::string cause = "canonical orientation preserved";
+		if ( !canonical_ok ) {
+			cause = "failed to rasterize canonical CPU glyph";
+		} else if ( !presented_ok ) {
+			cause = "failed to capture presented glyph";
+		} else if ( vertical_flip ) {
+			cause = "vertical inversion in displayed glyph";
+		} else if ( horizontal_flip ) {
+			cause = "horizontal inversion in displayed glyph";
+		} else if ( axis_informative && large_direct_diff ) {
+			cause = "large direct mismatch against canonical glyph";
+		} else if ( axis_informative && !direct_beats_mirror ) {
+			cause = "canonical glyph matched a mirrored orientation better than the direct orientation";
+		} else if ( !axis_informative ) {
+			cause = "selected glyph was too symmetric after normalization";
+		}
+
+		const bool case_ok = canonical_ok
+			&& presented_ok
+			&& !vertical_flip
+			&& !horizontal_flip
+			&& ( !axis_informative || ( direct_beats_mirror && !large_direct_diff ) );
+		all_cases_ok = all_cases_ok && case_ok;
+
+		details << current.label
+			<< "(font=" << font
+			<< ", cp=U+" << ve_fontcache_backend_test_format_codepoint( current.codepoint )
+			<< "): canonical_bbox=" << ve_fontcache_backend_test_format_bbox( canonical.bbox )
+			<< ", presented_bbox=" << ve_fontcache_backend_test_format_bbox( presented.bbox )
+			<< ", canonical_centroid=" << ve_fontcache_backend_test_format_center( canonical.center )
+			<< ", presented_centroid=" << ve_fontcache_backend_test_format_center( presented.center )
+			<< ", canonical_bitmap_box=(" << canonical.bitmap_box_x0 << "," << canonical.bitmap_box_y0
+			<< ")-(" << canonical.bitmap_box_x1 << "," << canonical.bitmap_box_y1 << ")"
+			<< ", presented_draw_rect=(" << presented.draw_rect.x << "," << presented.draw_rect.y
+			<< " " << presented.draw_rect.w << "x" << presented.draw_rect.h << ")"
+			<< ", presented_read_rect=(" << presented.read_rect.x << "," << presented.read_rect.y
+			<< " " << presented.read_rect.w << "x" << presented.read_rect.h << ")"
+			<< ", target_pass=" << presented.target_pass
+			<< ", diff=" << ve_fontcache_backend_test_format_diff( diff )
+			<< ", mirror_scores={direct=" << std::to_string( mirror_scores.direct )
+			<< ", horizontal=" << std::to_string( mirror_scores.horizontal )
+			<< ", vertical=" << std::to_string( mirror_scores.vertical )
+			<< ", both=" << std::to_string( mirror_scores.both ) << "}"
+			<< ", canonical_symmetry={horizontal=" << std::to_string( symmetry_scores.horizontal )
+			<< ", vertical=" << std::to_string( symmetry_scores.vertical ) << "}"
+			<< "; probable cause: " << cause;
+	}
+
+	if ( !any_case_ran ) {
+		ve_fontcache_backend_test_skip(
+			result,
+			"real_text_canonical_glyph_orientation skipped: no supplied font contained R or U+3091" );
+		return;
+	}
+
+	ve_fontcache_backend_test_expect(
+		result,
+		informative_case_seen && all_cases_ok,
+		std::string( "real_text_canonical_glyph_orientation: " ) + details.str()
+			+ ( informative_case_seen
+				? ""
+				: "; probable cause: selected glyphs were too symmetric for authoritative orientation detection" ) );
+}
+
 inline void ve_fontcache_backend_test_run_real_text_micro_scene(
 	ve_fontcache_backend_test_result& result,
 	const ve_fontcache_backend_test_options& options )
@@ -5536,10 +5988,15 @@ inline void ve_fontcache_backend_test_run_real_text_harfbuzz_scene(
 		ve_fontcache_backend_test_skip( result, "real_text.hb_scene skipped: Arabic/Hebrew font ids not supplied" );
 		return;
 	}
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
 	if ( !options.cache->use_freetype ) {
 		ve_fontcache_backend_test_skip( result, "real_text.hb_scene skipped: STB mode uses the generic real-text scene only" );
 		return;
 	}
+#else
+	ve_fontcache_backend_test_skip( result, "real_text.hb_scene skipped: FreeType mode is not compiled in" );
+	return;
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
 
 	const int target_w = ve_fontcache_backend_test_target_width( options.cache );
 	const int target_h = ve_fontcache_backend_test_target_height( options.cache );
@@ -5694,6 +6151,7 @@ inline void ve_fontcache_backend_test_run_real_text_suites(
 	ve_fontcache_backend_test_run_real_text_cached_glyph_orientation( result, options );
 	ve_fontcache_backend_test_run_real_text_uncached_glyph_orientation( result, options );
 	ve_fontcache_backend_test_run_real_text_cpu_cached_glyph_orientation( result, options );
+	ve_fontcache_backend_test_run_real_text_canonical_glyph_orientation( result, options );
 	ve_fontcache_backend_test_run_real_text_micro_scene( result, options );
 	ve_fontcache_backend_test_run_real_text_harfbuzz_scene( result, options );
 	ve_fontcache_backend_test_run_full_demo_frame_smoke( result, options );
