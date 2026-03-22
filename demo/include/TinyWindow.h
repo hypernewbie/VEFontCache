@@ -1031,6 +1031,29 @@ namespace TinyWindow
 #endif 
         }
 
+#if defined(TW_WINDOWS)
+        // [UAA] Preserve hidden startup across Win32 helper calls instead of letting style/geometry updates reveal test windows.
+        DWORD HiddenAwareSetWindowPosFlags(DWORD baseFlags) const
+        {
+            return baseFlags | (settings.startHidden ? SWP_HIDEWINDOW : SWP_SHOWWINDOW);
+        }
+
+        // [UAA] Preserve the original hidden-startup invariant when Win32 style helpers rewrite GWL_STYLE.
+        LONG_PTR HiddenAwareWindowStyle(LONG_PTR style) const
+        {
+            if ( settings.startHidden ) {
+                return style & ~static_cast< LONG_PTR >( WS_VISIBLE );
+            }
+            return style | WS_VISIBLE;
+        }
+#elif defined(TW_LINUX)
+        // [UAA] Keep helper-driven X11 remaps from overriding hidden startup during automated test runs.
+        bool ShouldRevealWindow() const
+        {
+            return !settings.startHidden;
+        }
+#endif
+
         /**
         * Set the Size/Resolution of the given window
         */
@@ -1041,7 +1064,7 @@ namespace TinyWindow
             SetWindowPos(windowHandle, HWND_TOP,
                 position.x, position.y,
                 newResolution.x, newResolution.y,
-                SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+                HiddenAwareSetWindowPosFlags( SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE ));
 #elif defined(TW_LINUX)
             XResizeWindow(currentDisplay,
                 windowHandle, newResolution.x, newResolution.y);
@@ -1059,7 +1082,7 @@ namespace TinyWindow
 #if defined(TW_WINDOWS)
             SetWindowPos(windowHandle, HWND_TOP, newPosition.x, newPosition.y,
                 settings.resolution.x, settings.resolution.y,
-                SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                HiddenAwareSetWindowPosFlags( SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE ));
 #elif defined(TW_LINUX)
             XWindowChanges windowChanges;
 
@@ -1148,10 +1171,16 @@ namespace TinyWindow
                 settings.currentState = state_t::minimized;
 
 #if defined(TW_WINDOWS)
-                ShowWindow(windowHandle, SW_MINIMIZE);
+                if ( !settings.startHidden )
+                {
+                    ShowWindow(windowHandle, SW_MINIMIZE);
+                }
 #elif defined(TW_LINUX)
-                XIconifyWindow(currentDisplay,
-                    windowHandle, 0);
+                if ( ShouldRevealWindow() )
+                {
+                    XIconifyWindow(currentDisplay,
+                        windowHandle, 0);
+                }
 #endif
             }
 
@@ -1159,10 +1188,13 @@ namespace TinyWindow
             {
                 settings.currentState = state_t::normal;
 #if defined(TW_WINDOWS)
-                ShowWindow(windowHandle, SW_RESTORE);
+                if ( !settings.startHidden )
+                {
+                    ShowWindow(windowHandle, SW_RESTORE);
+                }
 #elif defined(TW_LINUX)
                 // [UAA] Preserve hidden startup on Linux so automated tests do not map a visible X11 window.
-                if ( !settings.startHidden )
+                if ( ShouldRevealWindow() )
                 {
                     XMapWindow(currentDisplay, windowHandle);
                 }
@@ -1180,22 +1212,28 @@ namespace TinyWindow
             {
                 settings.currentState = state_t::maximized;
 #if defined(TW_WINDOWS)
-                ShowWindow(windowHandle, SW_MAXIMIZE);
+                if ( !settings.startHidden )
+                {
+                    ShowWindow(windowHandle, SW_MAXIMIZE);
+                }
 #elif defined(TW_LINUX)
-                XEvent currentEvent;
-                memset(&currentEvent, 0, sizeof(currentEvent));
+                if ( ShouldRevealWindow() )
+                {
+                    XEvent currentEvent;
+                    memset(&currentEvent, 0, sizeof(currentEvent));
 
-                currentEvent.xany.type = ClientMessage;
-                currentEvent.xclient.message_type = AtomState;
-                currentEvent.xclient.format = 32;
-                currentEvent.xclient.window = windowHandle;
-                currentEvent.xclient.data.l[0] = (currentState == state_t::maximized);
-                currentEvent.xclient.data.l[1] = AtomMaxVert;
-                currentEvent.xclient.data.l[2] = AtomMaxHorz;
+                    currentEvent.xany.type = ClientMessage;
+                    currentEvent.xclient.message_type = AtomState;
+                    currentEvent.xclient.format = 32;
+                    currentEvent.xclient.window = windowHandle;
+                    currentEvent.xclient.data.l[0] = (currentState == state_t::maximized);
+                    currentEvent.xclient.data.l[1] = AtomMaxVert;
+                    currentEvent.xclient.data.l[2] = AtomMaxHorz;
 
-                XSendEvent(currentDisplay,
-                    windowHandle,
-                    0, SubstructureNotifyMask, &currentEvent);
+                    XSendEvent(currentDisplay,
+                        windowHandle,
+                        0, SubstructureNotifyMask, &currentEvent);
+                }
 #endif
             }
 
@@ -1203,21 +1241,27 @@ namespace TinyWindow
             {
                 settings.currentState = state_t::normal;
 #if defined(TW_WINDOWS)
-                ShowWindow(windowHandle, SW_RESTORE);
+                if ( !settings.startHidden )
+                {
+                    ShowWindow(windowHandle, SW_RESTORE);
+                }
 #elif defined(TW_LINUX)
-                XEvent currentEvent;
-                memset(&currentEvent, 0, sizeof(currentEvent));
+                if ( ShouldRevealWindow() )
+                {
+                    XEvent currentEvent;
+                    memset(&currentEvent, 0, sizeof(currentEvent));
 
-                currentEvent.xany.type = ClientMessage;
-                currentEvent.xclient.message_type = AtomState;
-                currentEvent.xclient.format = 32;
-                currentEvent.xclient.window = windowHandle;
-                currentEvent.xclient.data.l[0] = (currentState == state_t::maximized);
-                currentEvent.xclient.data.l[1] = AtomMaxVert;
-                currentEvent.xclient.data.l[2] = AtomMaxHorz;
+                    currentEvent.xany.type = ClientMessage;
+                    currentEvent.xclient.message_type = AtomState;
+                    currentEvent.xclient.format = 32;
+                    currentEvent.xclient.window = windowHandle;
+                    currentEvent.xclient.data.l[0] = (currentState == state_t::maximized);
+                    currentEvent.xclient.data.l[1] = AtomMaxVert;
+                    currentEvent.xclient.data.l[2] = AtomMaxHorz;
 
-                XSendEvent(currentDisplay, windowHandle,
-                    0, SubstructureNotifyMask, &currentEvent);
+                    XSendEvent(currentDisplay, windowHandle,
+                        0, SubstructureNotifyMask, &currentEvent);
+                }
 #endif
             }
             return TinyWindow::error_t::success;
@@ -1302,9 +1346,12 @@ namespace TinyWindow
             if (newState)
             {
 #if defined(TW_WINDOWS)
-                SetFocus(windowHandle);
-#elif defined(TW_LINUX)
                 if ( !settings.startHidden )
+                {
+                    SetFocus(windowHandle);
+                }
+#elif defined(TW_LINUX)
+                if ( ShouldRevealWindow() )
                 {
                     XMapWindow(currentDisplay, windowHandle);
                 }
@@ -1328,9 +1375,15 @@ namespace TinyWindow
         std::error_code Restore()
         {
 #if defined(TW_WINDOWS)
-            ShowWindow(windowHandle, SW_RESTORE);
+            if ( !settings.startHidden )
+            {
+                ShowWindow(windowHandle, SW_RESTORE);
+            }
 #elif defined(TW_LINUX)
-            XMapWindow(currentDisplay, windowHandle);
+            if ( ShouldRevealWindow() )
+            {
+                XMapWindow(currentDisplay, windowHandle);
+            }
 #endif
             return TinyWindow::error_t::success;
         }
@@ -1439,7 +1492,7 @@ namespace TinyWindow
         {
 #if defined(TW_WINDOWS)
 
-            currentStyle = WS_VISIBLE | WS_CLIPSIBLINGS;
+            currentStyle = WS_CLIPSIBLINGS;
 
             if (decorators & border)
             {
@@ -1476,9 +1529,9 @@ namespace TinyWindow
                 currentStyle |= WS_SIZEBOX;
             }
 
-            SetWindowLongPtr(windowHandle, GWL_STYLE, static_cast<LONG_PTR>(currentStyle));
+            SetWindowLongPtr(windowHandle, GWL_STYLE, HiddenAwareWindowStyle( static_cast< LONG_PTR >( currentStyle ) ));
             SetWindowPos(windowHandle, HWND_TOP, position.x, position.y,
-                settings.resolution.width, settings.resolution.height, SWP_FRAMECHANGED);
+                settings.resolution.width, settings.resolution.height, HiddenAwareSetWindowPosFlags( SWP_FRAMECHANGED ));
 
 #elif defined(TW_LINUX)
 
@@ -1526,7 +1579,10 @@ namespace TinyWindow
             XChangeProperty(currentDisplay, windowHandle, AtomHints, XA_ATOM, 32,
                 PropModeReplace, (unsigned char*)hints, 5);
 
-            XMapWindow(currentDisplay, windowHandle);
+            if ( ShouldRevealWindow() )
+            {
+                XMapWindow(currentDisplay, windowHandle);
+            }
 #endif
             return TinyWindow::error_t::success;
         }
@@ -1573,10 +1629,10 @@ namespace TinyWindow
             }
 
             SetWindowLongPtr(windowHandle, GWL_STYLE,
-                static_cast<LONG_PTR>(currentStyle | WS_VISIBLE));
+                HiddenAwareWindowStyle( static_cast< LONG_PTR >( currentStyle ) ));
 
             SetWindowPos(windowHandle, HWND_TOPMOST, position.x, position.y,
-                settings.resolution.width, settings.resolution.height, SWP_FRAMECHANGED);
+                settings.resolution.width, settings.resolution.height, HiddenAwareSetWindowPosFlags( SWP_FRAMECHANGED ));
 #elif defined(TW_LINUX)
             if (decorators & closeButton)
             {
@@ -1660,7 +1716,10 @@ namespace TinyWindow
             XChangeProperty(currentDisplay, windowHandle, AtomHints, XA_ATOM, 32,
                 PropModeReplace, (unsigned char*)hints, 5);
 
-            XMapWindow(currentDisplay, windowHandle);
+            if ( ShouldRevealWindow() )
+            {
+                XMapWindow(currentDisplay, windowHandle);
+            }
 #endif
             return TinyWindow::error_t::success;
         }

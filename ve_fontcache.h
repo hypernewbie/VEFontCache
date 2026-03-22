@@ -525,6 +525,9 @@ ve_font_id ve_fontcache_loadfile( ve_fontcache* cache, const char* filename, std
 // Unload a font and relase memory. Calling ve_fontcache_shutdown already does this on all loaded fonts.
 void ve_fontcache_unload( ve_fontcache* cache, ve_font_id id );
 
+// Check whether a font id currently refers to a loaded font entry.
+bool ve_fontcache_is_valid_font_id( const ve_fontcache* cache, ve_font_id font );
+
 // Configure snapping glyphs to pixel border when hb_font is rendered to 2D screen. May affect kerning. This may be changed at any time.
 // Set both to zero to disable pixel snapping.
 void ve_fontcache_configure_snap( ve_fontcache* cache, uint32_t snap_width = 0, uint32_t snap_height = 0 );
@@ -1919,6 +1922,14 @@ static void ve_fontcache_draw_text_batch( ve_fontcache* cache, ve_fontcache_entr
 	}
 }
 
+bool ve_fontcache_is_valid_font_id( const ve_fontcache* cache, ve_font_id font )
+{
+	return cache
+		&& font >= 0
+		&& font < static_cast< ve_font_id >( cache->entry.size() )
+		&& cache->entry[ font ].used;
+}
+
 bool ve_fontcache_draw_text( ve_fontcache* cache, ve_font_id font, const std::u8string& text_utf8, float posx, float posy, float scalex, float scaley, bool shape_cache )
 {
 	STBTT_assert( cache );
@@ -1926,7 +1937,7 @@ bool ve_fontcache_draw_text( ve_fontcache* cache, ve_font_id font, const std::u8
 		printf( "ve_fontcache_draw_text: cache was null.\n" );
 		return false;
 	}
-	if ( font < 0 || font >= ( ve_font_id ) cache->entry.size() || !cache->entry[ font ].used ) {
+	if ( !ve_fontcache_is_valid_font_id( cache, font ) ) {
 		printf( "ve_fontcache_draw_text: invalid font id %d.\n", static_cast< int >( font ) );
 		return false;
 	}

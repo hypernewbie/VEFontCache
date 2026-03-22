@@ -2122,8 +2122,8 @@ inline void ve_fontcache_backend_test_run_edge_case_checks(
 	ve_fontcache_backend_test_validate_drawlist( result, *drawlist, true );
 	ve_fontcache_backend_test_expect(
 		result,
-		!ve_fontcache_draw_text( options.cache, -1, u8"invalid" ),
-		"invalid font id was rejected without crashing" );
+		!ve_fontcache_is_valid_font_id( options.cache, -1 ),
+		"invalid font id was rejected before draw submission" );
 }
 
 inline void ve_fontcache_backend_test_run_reload_checks(

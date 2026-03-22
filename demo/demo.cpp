@@ -484,11 +484,47 @@ static void load_demo_fonts()
 	demo_grid3_font = load_demo_font( &cache, "fonts/Bitter-Regular.ttf", buffer5, 44.0f );
 }
 
+static ve_font_id pick_first_available_demo_font( std::initializer_list< ve_font_id > ids )
+{
+	for ( ve_font_id id : ids ) {
+		if ( id >= 0 ) {
+			return id;
+		}
+	}
+	return static_cast< ve_font_id >( -1 );
+}
+
+static void normalize_demo_font_ids( ve_font_id* huge_font = nullptr )
+{
+	print_font = pick_first_available_demo_font( { print_font, title_font, small_font, mono_font, demo_serif_font, demo_mono_font, demo_grid3_font } );
+	title_font = pick_first_available_demo_font( { title_font, print_font, mono_font, demo_serif_font } );
+	mono_font = pick_first_available_demo_font( { mono_font, print_font, title_font } );
+	small_font = pick_first_available_demo_font( { small_font, print_font, title_font, mono_font } );
+	logo_font = pick_first_available_demo_font( { logo_font, title_font, print_font } );
+	demo_sans_font = pick_first_available_demo_font( { demo_sans_font, print_font, title_font } );
+	demo_serif_font = pick_first_available_demo_font( { demo_serif_font, print_font, title_font } );
+	demo_script_font = pick_first_available_demo_font( { demo_script_font, demo_serif_font, demo_sans_font, print_font } );
+	demo_mono_font = pick_first_available_demo_font( { demo_mono_font, mono_font, print_font } );
+	demo_chinese_font = pick_first_available_demo_font( { demo_chinese_font, demo_japanese_font, demo_grid2_font, print_font } );
+	demo_japanese_font = pick_first_available_demo_font( { demo_japanese_font, demo_chinese_font, demo_grid2_font, print_font } );
+	demo_korean_font = pick_first_available_demo_font( { demo_korean_font, demo_chinese_font, demo_japanese_font, print_font } );
+	demo_thai_font = pick_first_available_demo_font( { demo_thai_font, demo_sans_font, print_font } );
+	demo_arabic_font = pick_first_available_demo_font( { demo_arabic_font, print_font } );
+	demo_hebrew_font = pick_first_available_demo_font( { demo_hebrew_font, print_font } );
+	demo_raincode_font = pick_first_available_demo_font( { demo_raincode_font, demo_mono_font, print_font } );
+	demo_grid2_font = pick_first_available_demo_font( { demo_grid2_font, demo_chinese_font, demo_japanese_font, print_font } );
+	demo_grid3_font = pick_first_available_demo_font( { demo_grid3_font, demo_serif_font, print_font } );
+	if ( huge_font != nullptr && *huge_font < 0 ) {
+		*huge_font = print_font;
+	}
+}
+
 void init_demo()
 {
 	ve_fontcache_init( &cache );
 	ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
 	load_demo_fonts();
+	normalize_demo_font_ids();
 }
 
 void render_demo( TinyWindow::tWindow* window, float dT )
@@ -1071,15 +1107,6 @@ static int run_backend_test_mode()
 	int total_skipped = 0;
 
 	const auto run_mode = [&]( const char* mode_name, bool use_freetype ) {
-		auto pick_first_available = []( std::initializer_list< ve_font_id > ids ) {
-			for ( ve_font_id id : ids ) {
-				if ( id >= 0 ) {
-					return id;
-				}
-			}
-			return static_cast< ve_font_id >( -1 );
-		};
-
 		cache = ve_fontcache();
 		ve_fontcache_init( &cache, use_freetype );
 		ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
@@ -1108,15 +1135,6 @@ static int run_backend_test_mode()
 				logo_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", fallback_logo_buffer, 72.0f );
 			}
 		};
-		const auto normalize_font_ids = [&]( ve_font_id& huge_font ) {
-			print_font = pick_first_available( { print_font, title_font, small_font, mono_font, demo_serif_font, demo_mono_font, demo_grid3_font } );
-			title_font = pick_first_available( { title_font, print_font, mono_font, demo_serif_font } );
-			small_font = pick_first_available( { small_font, print_font, title_font } );
-			logo_font = pick_first_available( { logo_font, title_font, print_font } );
-			if ( huge_font < 0 ) {
-				huge_font = print_font;
-			}
-		};
 		if ( !use_freetype ) {
 			apply_font_fallbacks();
 		}
@@ -1124,7 +1142,7 @@ static int run_backend_test_mode()
 		if ( huge_test_font < 0 && !use_freetype ) {
 			huge_test_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", huge_buffer, 200.0f );
 		}
-		normalize_font_ids( huge_test_font );
+		normalize_demo_font_ids( &huge_test_font );
 
 		bool fonts_ready =
 			print_font >= 0
@@ -1180,7 +1198,7 @@ static int run_backend_test_mode()
 				apply_font_fallbacks();
 			}
 			ve_font_id refreshed_huge_font = -1;
-			normalize_font_ids( refreshed_huge_font );
+			normalize_demo_font_ids( &refreshed_huge_font );
 			clear_backend_test_surfaces( true );
 		};
 
