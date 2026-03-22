@@ -124,7 +124,8 @@ static IDXGISwapChain* g_swapchain = nullptr;
 static ID3D11Device* g_device = nullptr;
 static ID3D11DeviceContext* g_context = nullptr;
 static ID3D11Texture2D* g_backbuffer_texture = nullptr;
-static ID3D11RenderTargetView* g_backbuffer_rtv = nullptr;
+static ID3D11RenderTargetView* g_backbuffer_rtv_linear = nullptr;
+static ID3D11RenderTargetView* g_backbuffer_rtv_srgb = nullptr;
 static dx11_texture_target g_glyph_buffer;
 static dx11_texture_target g_atlas;
 static std::vector< dx11_cpu_atlas_page > g_cpu_atlas_pages;
@@ -143,6 +144,7 @@ static ID3D11SamplerState* g_point_sampler = nullptr;
 static ID3D11RasterizerState* g_rasterizer_state = nullptr;
 static ID3D11Buffer* g_cb_blit_atlas = nullptr;
 static ID3D11Buffer* g_cb_draw_text = nullptr;
+static bool g_dx11_test_mode = false;
 static void DX_CHECK_IMPL( HRESULT hr, int line )
 {
 if ( FAILED( hr ) ) {
@@ -459,6 +461,11 @@ const float clear_colour[ 4 ] = { 0.0f, 0.0f, 0.0f, 0.0f };
 g_context->ClearRenderTargetView( rtv, clear_colour );
 }
 
+static ID3D11RenderTargetView* dx11_current_backbuffer_rtv()
+{
+return g_dx11_test_mode ? g_backbuffer_rtv_linear : g_backbuffer_rtv_srgb;
+}
+
 static void dx11_set_render_target( ID3D11RenderTargetView* rtv, UINT width, UINT height )
 {
 dx11_unbind_ps_srv0();
@@ -628,14 +635,21 @@ static void dx11_update_texture_region_from_greyscale( ID3D11Texture2D* texture,
 
 static void dx11_release_backbuffer()
 {
-dx11_release( g_backbuffer_rtv );
+dx11_release( g_backbuffer_rtv_srgb );
+dx11_release( g_backbuffer_rtv_linear );
 dx11_release( g_backbuffer_texture );
 }
 
 static void dx11_create_backbuffer()
 {
 DX_CHECK( g_swapchain->GetBuffer( 0, __uuidof( ID3D11Texture2D ), reinterpret_cast< void** >( &g_backbuffer_texture ) ) );
-DX_CHECK( g_device->CreateRenderTargetView( g_backbuffer_texture, nullptr, &g_backbuffer_rtv ) );
+DX_CHECK( g_device->CreateRenderTargetView( g_backbuffer_texture, nullptr, &g_backbuffer_rtv_linear ) );
+
+D3D11_RENDER_TARGET_VIEW_DESC srgb_desc = {};
+srgb_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+srgb_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+srgb_desc.Texture2D.MipSlice = 0;
+DX_CHECK( g_device->CreateRenderTargetView( g_backbuffer_texture, &srgb_desc, &g_backbuffer_rtv_srgb ) );
 }
 
 static void dx11_resize_backbuffer( UINT width, UINT height )
@@ -694,7 +708,7 @@ return 0;
 return DefWindowProcA( hwnd, message, wparam, lparam );
 }
 
-static void dx11_create_window( int width, int height )
+static void dx11_create_window( int width, int height, bool start_hidden )
 {
 WNDCLASSA wc = {};
 wc.lpfnWndProc = dx11_window_proc;
@@ -719,7 +733,7 @@ nullptr,
 wc.hInstance,
 nullptr );
 assert( g_hwnd != nullptr );
-ShowWindow( g_hwnd, SW_SHOWDEFAULT );
+ShowWindow( g_hwnd, start_hidden ? SW_HIDE : SW_SHOWDEFAULT );
 UpdateWindow( g_hwnd );
 }
 
@@ -876,9 +890,9 @@ g_hwnd = nullptr;
 }
 }
 
-static void dx11_initialise( int width, int height )
+static void dx11_initialise( int width, int height, bool start_hidden )
 {
-dx11_create_window( width, height );
+dx11_create_window( width, height, start_hidden );
 dx11_create_device_and_swapchain( width, height );
 dx11_create_backend_resources();
 }
@@ -968,7 +982,7 @@ g_context->VSSetConstantBuffers( 0, 1, &g_cb_blit_atlas );
 g_context->PSSetConstantBuffers( 0, 1, &g_cb_blit_atlas );
 g_context->PSSetShaderResources( 0, 1, &g_glyph_buffer.srv );
 } else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET || dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_UNCACHED || dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_CPU_CACHED ) {
-dx11_set_render_target( g_backbuffer_rtv, window_size.width, window_size.height );
+dx11_set_render_target( dx11_current_backbuffer_rtv(), window_size.width, window_size.height );
 g_context->OMSetBlendState( g_blend_alpha, blend_factor, 0xFFFFFFFFu );
 g_context->IASetInputLayout( g_input_layout_draw_text );
 g_context->VSSetShader( g_vs_draw_text, nullptr, 0 );
@@ -1034,7 +1048,7 @@ continue;
 } else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS ) {
 current_rtv = g_atlas.rtv;
 } else {
-current_rtv = g_backbuffer_rtv;
+current_rtv = dx11_current_backbuffer_rtv();
 }
 dx11_clear_render_target( current_rtv );
 }
@@ -1124,10 +1138,8 @@ void test_font2( ve_font_id id )
 }
 #endif
 
-void init_demo()
+static void load_demo_fonts()
 {
-	ve_fontcache_init( &cache );
-	ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
 	static std::vector< uint8_t > buffer, buffer2, buffer3, buffer4, buffer5, buffer6,
 		buffer7, buffer8, buffer9, buffer10, buffer11, buffer12, buffer13, buffer14;
 
@@ -1152,6 +1164,13 @@ void init_demo()
 	demo_raincode_font = load_demo_font( &cache, "fonts/NotoSansJP-Regular.otf", buffer13, 20.0f );
 	demo_grid2_font = load_demo_font( &cache, "fonts/NotoSerifSC-Regular.otf", buffer8, 54.0f );
 	demo_grid3_font = load_demo_font( &cache, "fonts/Bitter-Regular.ttf", buffer5, 44.0f );
+}
+
+void init_demo()
+{
+	ve_fontcache_init( &cache );
+	ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
+	load_demo_fonts();
 }
 
 void render_demo( float dT )
@@ -1501,19 +1520,59 @@ static void clear_framebuffer_colour( ID3D11RenderTargetView* rtv )
 dx11_clear_render_target( rtv );
 }
 
-static void clear_backend_test_surfaces()
+static void clear_backend_test_surfaces( bool clear_cpu_atlas_pages = true )
 {
 clear_framebuffer_colour( g_glyph_buffer.rtv );
 clear_framebuffer_colour( g_atlas.rtv );
-clear_framebuffer_colour( g_backbuffer_rtv );
+clear_framebuffer_colour( dx11_current_backbuffer_rtv() );
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+	if ( clear_cpu_atlas_pages && !g_cpu_atlas_pages.empty() ) {
+		static std::vector< uint8_t > zeros( static_cast< size_t >( VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE ) * VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE, 0 );
+		for ( const dx11_cpu_atlas_page& page : g_cpu_atlas_pages ) {
+			if ( !page.texture ) {
+				continue;
+			}
+			g_context->UpdateSubresource(
+				page.texture,
+				0,
+				nullptr,
+				zeros.data(),
+				VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE,
+				0 );
+		}
+	}
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
 g_context->Flush();
 }
 
 static void backend_test_reset_surfaces()
 {
-	clear_backend_test_surfaces();
+	clear_backend_test_surfaces( cache.use_freetype ? false : true );
 	g_context->Flush();
 }
+
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+static void dx11_update_r8_texture_region_from_greyscale( ID3D11Texture2D* texture, UINT texture_height, int x, int y, int w, int h, const uint8_t* pixels )
+{
+	std::vector< uint8_t > r8_pixels( static_cast< size_t >( w ) * static_cast< size_t >( h ) );
+	for ( int row = 0; row < h; row++ ) {
+		std::memcpy(
+			r8_pixels.data() + static_cast< size_t >( row ) * w,
+			pixels + static_cast< size_t >( h - 1 - row ) * w,
+			static_cast< size_t >( w ) );
+	}
+
+	const UINT top = dx11_bottom_left_to_top_left_y( texture_height, y, h );
+	D3D11_BOX box = {};
+	box.left = static_cast< UINT >( x );
+	box.top = top;
+	box.right = static_cast< UINT >( x + w );
+	box.bottom = top + static_cast< UINT >( h );
+	box.front = 0;
+	box.back = 1;
+	g_context->UpdateSubresource( texture, 0, &box, r8_pixels.data(), static_cast< UINT >( w ), 0 );
+}
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
 
 static bool backend_test_write_surface( const char* name, int x, int y, int w, int h, const uint8_t* pixels )
 {
@@ -1553,6 +1612,25 @@ static bool backend_test_write_surface( const char* name, int x, int y, int w, i
 		return true;
 	}
 
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+	if ( std::strcmp( name, "cpu_atlas_page_0" ) == 0 ) {
+		if ( x + w > VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE || y + h > VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE ) {
+			return false;
+		}
+		dx11_ensure_cpu_atlas_page( 0 );
+		dx11_update_r8_texture_region_from_greyscale(
+			g_cpu_atlas_pages[ 0 ].texture,
+			VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE,
+			x,
+			y,
+			w,
+			h,
+			pixels );
+		g_context->Flush();
+		return true;
+	}
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
+
 	return false;
 }
 
@@ -1564,94 +1642,222 @@ return dx11_readback_texture_region( g_glyph_buffer.texture, x, y, w, h, out_pix
 if ( std::strcmp( name, "atlas" ) == 0 ) {
 return dx11_readback_texture_region( g_atlas.texture, x, y, w, h, out_pixels );
 }
-if ( std::strcmp( name, "target" ) == 0 ) {
+if ( std::strcmp( name, "target" ) == 0 || std::strcmp( name, "target_linear" ) == 0 || std::strcmp( name, "presented" ) == 0 ) {
 return dx11_readback_texture_region( g_backbuffer_texture, x, y, w, h, out_pixels );
 }
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+if ( std::strcmp( name, "cpu_atlas_page_0" ) == 0 && !g_cpu_atlas_pages.empty() && g_cpu_atlas_pages[ 0 ].texture ) {
+return dx11_readback_texture_region( g_cpu_atlas_pages[ 0 ].texture, x, y, w, h, out_pixels );
+}
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
 return false;
 }
 
-static void backend_test_execute()
+static void backend_test_execute_pipeline()
 {
-clear_framebuffer_colour( g_backbuffer_rtv );
+clear_framebuffer_colour( dx11_current_backbuffer_rtv() );
 fontcache_drawcmd();
 g_context->Flush();
 }
 
+static void backend_test_execute_present()
+{
+	g_context->Flush();
+}
+
+static void backend_test_execute_frame()
+{
+	clear_backend_test_surfaces( cache.use_freetype ? false : true );
+	ve_fontcache_flush_drawlist( &cache );
+	ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
+
+	const float sx = 1.0f / window_size.width;
+	const float sy = 1.0f / window_size.height;
+	const ve_font_id logo_frame_font = logo_font >= 0 ? logo_font : print_font;
+	const ve_font_id title_frame_font = title_font >= 0 ? title_font : print_font;
+	const ve_font_id cjk_frame_font = demo_chinese_font >= 0 ? demo_chinese_font : print_font;
+	const ve_font_id arabic_frame_font = demo_arabic_font >= 0 ? demo_arabic_font : print_font;
+	const ve_font_id hebrew_frame_font = demo_hebrew_font >= 0 ? demo_hebrew_font : print_font;
+	const ve_font_id rain_frame_font = demo_raincode_font >= 0 ? demo_raincode_font : print_font;
+	const ve_font_id grid_frame_font = demo_grid2_font >= 0 ? demo_grid2_font : print_font;
+	ve_fontcache_draw_text( &cache, logo_frame_font, u8"ゑ", 0.08f, 0.84f, sx, sy, false );
+	ve_fontcache_draw_text( &cache, title_frame_font, u8"VEFontCache Demo", 0.18f, 0.84f, sx, sy, false );
+	ve_fontcache_draw_text(
+		&cache,
+		print_font,
+		u8"Backend conformance frame using real demo fonts and strings.",
+		0.08f,
+		0.78f,
+		sx,
+		sy,
+		false );
+	ve_fontcache_draw_text( &cache, cjk_frame_font, u8"床前明月光 疑是地上霜", 0.58f, 0.78f, sx, sy, false );
+	ve_fontcache_draw_text( &cache, arabic_frame_font, u8"حب السماء لا تمطر غير الأحلام", 0.08f, 0.42f, sx, sy, false );
+	ve_fontcache_draw_text( &cache, hebrew_frame_font, u8"אז הגיע הלילה של כוכב השביט הראשון", 0.08f, 0.32f, sx, sy, false );
+	ve_fontcache_draw_text( &cache, rain_frame_font, u8"CODE CODE CODE 0123456789", 0.62f, 0.42f, sx, sy, false );
+	ve_fontcache_draw_text( &cache, grid_frame_font, u8"漢字キャッシュ圧力", 0.62f, 0.26f, sx, sy, false );
+	backend_test_execute_pipeline();
+	backend_test_execute_present();
+}
+
 static int run_backend_test_mode()
 {
-ve_fontcache_init( &cache, false );
+	int total_passed = 0;
+	int total_failed = 0;
+	int total_skipped = 0;
+
+	const auto run_mode = [&]( const char* mode_name, bool use_freetype ) {
+		auto pick_first_available = []( std::initializer_list< ve_font_id > ids ) {
+			for ( ve_font_id id : ids ) {
+				if ( id >= 0 ) {
+					return id;
+				}
+			}
+			return static_cast< ve_font_id >( -1 );
+		};
+
+		cache = ve_fontcache();
+		ve_fontcache_init( &cache, use_freetype );
+		ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
+		load_demo_fonts();
+
+		std::vector< uint8_t > huge_buffer;
+		std::vector< uint8_t > fallback_print_buffer;
+		std::vector< uint8_t > fallback_title_buffer;
+		std::vector< uint8_t > fallback_small_buffer;
+		std::vector< uint8_t > fallback_logo_buffer;
+		std::vector< std::vector< uint8_t > > reload_buffers;
+		const auto apply_font_fallbacks = [&]() {
+			if ( print_font < 0 ) {
+				print_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", fallback_print_buffer, 19.0f );
+			}
+			if ( title_font < 0 ) {
+				title_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", fallback_title_buffer, 42.0f );
+			}
+			if ( small_font < 0 ) {
+				small_font = load_demo_font( &cache, "fonts/Roboto-Regular.ttf", fallback_small_buffer, 10.0f );
+				if ( small_font < 0 ) {
+					small_font = print_font;
+				}
+			}
+			if ( logo_font < 0 ) {
+				logo_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", fallback_logo_buffer, 72.0f );
+			}
+		};
+		const auto normalize_font_ids = [&]( ve_font_id& huge_font ) {
+			print_font = pick_first_available( { print_font, title_font, small_font, mono_font, demo_serif_font, demo_mono_font, demo_grid3_font } );
+			title_font = pick_first_available( { title_font, print_font, mono_font, demo_serif_font } );
+			small_font = pick_first_available( { small_font, print_font, title_font } );
+			logo_font = pick_first_available( { logo_font, title_font, print_font } );
+			if ( huge_font < 0 ) {
+				huge_font = print_font;
+			}
+		};
+		if ( !use_freetype ) {
+			apply_font_fallbacks();
+		}
+		ve_font_id huge_test_font = load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", huge_buffer, 200.0f );
+		if ( huge_test_font < 0 && !use_freetype ) {
+			huge_test_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", huge_buffer, 200.0f );
+		}
+		normalize_font_ids( huge_test_font );
+
+		bool fonts_ready =
+			print_font >= 0
+			&& huge_test_font >= 0;
+		if ( !fonts_ready ) {
+			std::printf( "VEFontCache backend tests [%s] failed to load one or more demo fonts.\n", mode_name );
+			ve_fontcache_shutdown( &cache );
+			return false;
+		}
+
+		clear_backend_test_surfaces( use_freetype ? false : true );
+
+		ve_fontcache_backend_test_options options;
+		options.cache = &cache;
+		options.font = print_font;
+		options.secondary_font = title_font >= 0 ? title_font : print_font;
+		options.small_font = small_font >= 0 ? small_font : print_font;
+		options.latin_font = demo_grid3_font >= 0 ? demo_grid3_font : options.secondary_font;
+		options.cjk_font = demo_grid2_font >= 0 ? demo_grid2_font : print_font;
+		options.huge_font = huge_test_font;
+		options.arabic_font = use_freetype ? demo_arabic_font : -1;
+		options.hebrew_font = use_freetype ? demo_hebrew_font : -1;
+		options.capabilities.has_present_surface = true;
+		options.capabilities.has_target_linear_surface = true;
 #ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
-cache.use_freetype = false;
+		options.capabilities.has_cpu_atlas_surface = true;
+		options.capabilities.supports_freetype_mode = true;
 #endif // VE_FONTCACHE_FREETYPE_RASTERISATION
-ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
+#ifdef VE_FONTCACHE_HARFBUZZ
+		options.capabilities.supports_harfbuzz_mode = true;
+#endif // VE_FONTCACHE_HARFBUZZ
+		options.execute_pipeline = backend_test_execute_pipeline;
+		options.execute_present = backend_test_execute_present;
+		options.execute_frame = backend_test_execute_frame;
+		options.readback_surface = backend_test_readback;
+		options.reset_surfaces = backend_test_reset_surfaces;
+		options.write_surface = backend_test_write_surface;
+		options.reload_font = [ &reload_buffers ]() -> ve_font_id {
+			reload_buffers.emplace_back();
+			return load_demo_font(
+				&cache,
+				cache.use_freetype ? "fonts/NotoSansJP-Light.otf" : "fonts/OpenSans-Regular.ttf",
+				reload_buffers.back(),
+				19.0f );
+		};
+		options.prepare_real_text = [&, use_freetype]() {
+			ve_fontcache_shutdown( &cache );
+			cache = ve_fontcache();
+			ve_fontcache_init( &cache, use_freetype );
+			ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
+			load_demo_fonts();
+			if ( !use_freetype ) {
+				apply_font_fallbacks();
+			}
+			ve_font_id refreshed_huge_font = -1;
+			normalize_font_ids( refreshed_huge_font );
+			clear_backend_test_surfaces( true );
+		};
 
-std::vector< uint8_t > primary_buffer;
-std::vector< uint8_t > secondary_buffer;
-std::vector< uint8_t > small_buffer;
-std::vector< uint8_t > latin_buffer;
-std::vector< uint8_t > cjk_buffer;
-std::vector< uint8_t > huge_buffer;
-std::vector< std::vector< uint8_t > > reload_buffers;
+		ve_fontcache_backend_test_result result = ve_fontcache_backend_test_run( options );
+		std::printf(
+			"VEFontCache backend tests [%s]: %d passed, %d failed, %d skipped\n",
+			mode_name,
+			result.passed,
+			result.failed,
+			result.skipped );
+		for ( const std::string& failure : result.failures ) {
+			std::printf( "FAIL[%s]: %s\n", mode_name, failure.c_str() );
+		}
+		for ( const std::string& skipped : result.skipped_tests ) {
+			std::printf( "SKIP[%s]: %s\n", mode_name, skipped.c_str() );
+		}
 
-ve_font_id primary_font = load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", primary_buffer, 19.0f );
-ve_font_id secondary_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", secondary_buffer, 48.0f );
-ve_font_id small_test_font = load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", small_buffer, 10.0f );
-ve_font_id latin_test_font = load_demo_font( &cache, "fonts/OpenSans-Regular.ttf", latin_buffer, 42.0f );
-ve_font_id cjk_test_font = load_demo_font( &cache, "fonts/NotoSerifSC-Regular.otf", cjk_buffer, 54.0f );
-ve_font_id huge_test_font = load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", huge_buffer, 200.0f );
+		total_passed += result.passed;
+		total_failed += result.failed;
+		total_skipped += result.skipped;
+		ve_fontcache_shutdown( &cache );
+		return result.failed == 0;
+	};
 
-const bool fonts_ready =
-primary_font >= 0
-&& secondary_font >= 0
-&& small_test_font >= 0
-&& latin_test_font >= 0
-&& cjk_test_font >= 0
-&& huge_test_font >= 0;
-	if ( !fonts_ready ) {
-std::printf( "VEFontCache backend tests failed to load one or more demo fonts.\n" );
-ve_fontcache_shutdown( &cache );
-return 1;
-}
+	bool ok = run_mode( "stb", false );
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+	ok = run_mode( "freetype", true ) && ok;
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
 
-	clear_backend_test_surfaces();
-
-	ve_fontcache_backend_test_options options;
-options.cache = &cache;
-options.font = primary_font;
-options.secondary_font = secondary_font;
-options.small_font = small_test_font;
-options.latin_font = latin_test_font;
-options.cjk_font = cjk_test_font;
-options.huge_font = huge_test_font;
-options.execute = backend_test_execute;
-options.readback = backend_test_readback;
-options.reset_surfaces = backend_test_reset_surfaces;
-options.write_surface = backend_test_write_surface;
-options.reload_font = [ &reload_buffers ]() -> ve_font_id {
-reload_buffers.emplace_back();
-return load_demo_font( &cache, "fonts/NotoSansJP-Light.otf", reload_buffers.back(), 19.0f );
-};
-
-ve_fontcache_backend_test_result result = ve_fontcache_backend_test_run( options );
-std::printf(
-"VEFontCache backend tests: %d passed, %d failed, %d skipped\n",
-result.passed,
-result.failed,
-result.skipped );
-for ( const std::string& failure : result.failures ) {
-std::printf( "FAIL: %s\n", failure.c_str() );
-}
-	for ( const std::string& skipped : result.skipped_tests ) {
-		std::printf( "SKIP: %s\n", skipped.c_str() );
-	}
-
-	ve_fontcache_shutdown( &cache );
-	return result.failed == 0 ? 0 : 1;
+	std::printf(
+		"VEFontCache backend tests [all modes]: %d passed, %d failed, %d skipped\n",
+		total_passed,
+		total_failed,
+		total_skipped );
+	return ok ? 0 : 1;
 }
 
 int main( int argc, char** argv )
 {
-dx11_initialise( 1980, 1080 );
+g_dx11_test_mode = has_flag( argc, argv, "--test" );
+dx11_initialise( 1980, 1080, g_dx11_test_mode );
 
 #ifndef VE_FONTCACHE_DEBUGPRINT
 const int numGlyphs = 1024;
@@ -1666,7 +1872,7 @@ std::printf( "ve_fontcache_cache_glyph() benchmark: total %lf ms for %d glyphs, 
 }
 #endif // VE_FONTCACHE_DEBUGPRINT
 
-if ( has_flag( argc, argv, "--test" ) ) {
+if ( g_dx11_test_mode ) {
 int exit_code = run_backend_test_mode();
 dx11_destroy();
 return exit_code;
@@ -1696,7 +1902,7 @@ const float clear_colour[ 4 ] = {
 0.251f * 0.251f,
 1.0f,
 };
-g_context->ClearRenderTargetView( g_backbuffer_rtv, clear_colour );
+g_context->ClearRenderTargetView( dx11_current_backbuffer_rtv(), clear_colour );
 
 render_demo( 1.0f / 60.0f );
 fontcache_drawcmd();

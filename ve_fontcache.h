@@ -594,6 +594,9 @@ FT_Library ve_fontcache::freetype;
 void ve_fontcache_init( ve_fontcache* cache, bool use_FreeType_CPU )
 {
 	STBTT_assert( cache );
+#ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
+	cache->use_freetype = false;
+#endif // VE_FONTCACHE_FREETYPE_RASTERISATION
 
 	// Reserve global context data.
 	cache->entry.reserve( 8 );

@@ -327,6 +327,8 @@ namespace TinyWindow
             this->versionMajor = versionMajor;
             this->versionMinor = versionMinor;
             this->enableSRGB = false;
+            // [UAA] Default to showing windows unless a caller explicitly opts into hidden startup for automated tests.
+            this->startHidden = false;
 
             SetProfile(profile);
         }
@@ -346,6 +348,8 @@ namespace TinyWindow
         void*                                   userData;
         state_t                                 currentState;                                           /**< The current state of the window. these states include Normal, Minimized, Maximized and Full screen */
         bool                                    enableSRGB;                                             /**< whether the window will support an sRGB colorspace backbuffer*/
+        // [UAA] Allows demos to create a real context/window for `--test` without flashing a visible window.
+        bool                                    startHidden;                                            /**< whether the window should stay hidden when first created */
 
 #if defined(TW_WINDOWS) && !defined(TW_USE_VULKAN) 
         GLint                                   versionMajor;                                           /**< Major OpenGL version*/
@@ -1157,7 +1161,11 @@ namespace TinyWindow
 #if defined(TW_WINDOWS)
                 ShowWindow(windowHandle, SW_RESTORE);
 #elif defined(TW_LINUX)
-                XMapWindow(currentDisplay, windowHandle);
+                // [UAA] Preserve hidden startup on Linux so automated tests do not map a visible X11 window.
+                if ( !settings.startHidden )
+                {
+                    XMapWindow(currentDisplay, windowHandle);
+                }
 #endif
             }
             return TinyWindow::error_t::success;
@@ -1296,7 +1304,10 @@ namespace TinyWindow
 #if defined(TW_WINDOWS)
                 SetFocus(windowHandle);
 #elif defined(TW_LINUX)
-                XMapWindow(currentDisplay, windowHandle);
+                if ( !settings.startHidden )
+                {
+                    XMapWindow(currentDisplay, windowHandle);
+                }
 #endif
             }
 
@@ -1370,7 +1381,11 @@ namespace TinyWindow
                 XChangeProperty(currentDisplay, windowHandle, AtomHints, XA_ATOM, 32, PropModeReplace,
                     (unsigned char*)Hints, 5);
 
-                XMapWindow(currentDisplay, windowHandle);
+                // [UAA] Preserve hidden startup on Linux so automated tests do not map a visible X11 window.
+                if ( !settings.startHidden )
+                {
+                    XMapWindow(currentDisplay, windowHandle);
+                }
                 break;
             }
 
@@ -1383,7 +1398,11 @@ namespace TinyWindow
                 XChangeProperty(currentDisplay, windowHandle, AtomHints, XA_ATOM, 32, PropModeReplace,
                     (unsigned char*)Hints, 5);
 
-                XMapWindow(currentDisplay, windowHandle);
+                // [UAA] Preserve hidden startup on Linux so automated tests do not map a visible X11 window.
+                if ( !settings.startHidden )
+                {
+                    XMapWindow(currentDisplay, windowHandle);
+                }
                 break;
             }
 
@@ -1396,7 +1415,11 @@ namespace TinyWindow
                 XChangeProperty(currentDisplay, windowHandle, AtomHints, XA_ATOM, 32, PropModeReplace,
                     (unsigned char*)Hints, 5);
 
-                XMapWindow(currentDisplay, windowHandle);
+                // [UAA] Preserve hidden startup on Linux so automated tests do not map a visible X11 window.
+                if ( !settings.startHidden )
+                {
+                    XMapWindow(currentDisplay, windowHandle);
+                }
                 break;
             }
 
@@ -2928,7 +2951,8 @@ namespace TinyWindow
 #if !defined(TW_USE_VULKAN)
             InitializeGL(window);
 #endif
-            ShowWindow(window->windowHandle, 1);
+            // [UAA] Keep automated demo tests window-backed on Windows, but start the HWND hidden.
+            ShowWindow(window->windowHandle, window->settings.startHidden ? SW_HIDE : SW_SHOWDEFAULT);
             UpdateWindow(window->windowHandle);
 
             CheckWindowScreen(window);
@@ -4035,7 +4059,11 @@ namespace TinyWindow
                 exit(0);
             }
 
-            XMapWindow(currentDisplay, window->windowHandle);
+            // [UAA] Leave hidden test windows unmapped after creation while still allowing context setup.
+            if ( !window->settings.startHidden )
+            {
+                XMapWindow(currentDisplay, window->windowHandle);
+            }
             XStoreName(currentDisplay, window->windowHandle,
                 window->name);
 

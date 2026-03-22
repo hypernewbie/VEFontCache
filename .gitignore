@@ -1,4 +1,11 @@
 build/
 build2/
+build_vrhi/
 demo/build
 demo2
+temp/
+tmp/
+B*.md
+PLAN*.md
+S*.md
+*.rdc
