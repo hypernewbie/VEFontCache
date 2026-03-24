@@ -8,10 +8,10 @@ UTEST( freetype, init_use_freetype_true )
 	EXPECT_TRUE( ctx.cache.use_freetype );
 }
 
-UTEST( freetype, init_false_keeps_current_default )
+UTEST( freetype, init_false_disables_freetype )
 {
 	vefc_test::context ctx( false );
-	EXPECT_TRUE( ctx.cache.use_freetype );
+	EXPECT_FALSE( ctx.cache.use_freetype );
 }
 
 UTEST( freetype, load_font_creates_fontface )

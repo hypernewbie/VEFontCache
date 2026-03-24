@@ -28,6 +28,8 @@ jobs:
           -DCMAKE_CXX_COMPILER=cl
           -DVEFC_BUILD_DEMO=OFF
           -DVEFC_BUILD_TESTS=ON
+          -DVEFC_BUILD_DX11=OFF
+          -DVEFC_BUILD_VRHI=OFF
           -DVEFC_ENABLE_HARFBUZZ=${{ matrix.harfbuzz }}
           -DVEFC_ENABLE_FREETYPE=${{ matrix.freetype }}
       - name: Build
@@ -67,6 +69,8 @@ jobs:
           -DCMAKE_CXX_COMPILER=clang-cl
           -DVEFC_BUILD_DEMO=OFF
           -DVEFC_BUILD_TESTS=ON
+          -DVEFC_BUILD_DX11=OFF
+          -DVEFC_BUILD_VRHI=OFF
           -DVEFC_ENABLE_HARFBUZZ=${{ matrix.harfbuzz }}
           -DVEFC_ENABLE_FREETYPE=${{ matrix.freetype }}
       - name: Build

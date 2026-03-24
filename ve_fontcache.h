@@ -545,6 +545,11 @@ bool ve_fontcache_draw_text( ve_fontcache* cache, ve_font_id font, const std::u8
 // Get where the last ve_fontcache_draw_text call left off.
 ve_fontcache_vec2 ve_fontcache_get_cursor_pos( ve_fontcache* cache );
 
+// Shapes and measures text without emitting draw calls or mutating atlas/cache draw state.
+// May populate the text shape cache when `shape_cache` is true.
+// Returns { end_cursor_pos.x * scalex, end_cursor_pos.y * scaley }.
+ve_fontcache_vec2 ve_fontcache_measure_text( ve_fontcache* cache, ve_font_id font, const std::u8string& text_utf8, float scalex = 1.0f, float scaley = 1.0f, bool shape_cache = true );
+
 // Merges drawcalls. Significantly improves drawcall overhead, highly recommended. Call this before looping through and executing drawlist.
 void ve_fontcache_optimise_drawlist( ve_fontcache* cache );
 
@@ -1989,7 +1994,7 @@ bool ve_fontcache_draw_text( ve_fontcache* cache, ve_font_id font, const std::u8
 	ve_fontcache_draw_text_batch( cache, entry, shaped, batch_start_idx, ( int ) shaped.glyphs.size(), posx, posy, scalex, scaley );
 	ve_fontcache_reset_batch_codepoint_state( cache );
 	cache->cursor_pos.x = posx + shaped.end_cursor_pos.x * scalex;
-	cache->cursor_pos.y = posy + shaped.end_cursor_pos.x * scaley;
+	cache->cursor_pos.y = posy + shaped.end_cursor_pos.y * scaley;
 
 	return true;
 }
@@ -1997,6 +2002,25 @@ bool ve_fontcache_draw_text( ve_fontcache* cache, ve_font_id font, const std::u8
 ve_fontcache_vec2 ve_fontcache_get_cursor_pos( ve_fontcache* cache  )
 {
 	return cache->cursor_pos;
+}
+
+ve_fontcache_vec2 ve_fontcache_measure_text( ve_fontcache* cache, ve_font_id font, const std::u8string& text_utf8, float scalex, float scaley, bool shape_cache )
+{
+	STBTT_assert( cache );
+	if ( !cache ) {
+		return { 0.0f, 0.0f };
+	}
+	if ( !ve_fontcache_is_valid_font_id( cache, font ) ) {
+		return { 0.0f, 0.0f };
+	}
+
+	ve_fontcache_shaped_text uncached_shaped;
+	if ( !shape_cache ) {
+		ve_fontcache_shape_text_uncached( cache, font, uncached_shaped, text_utf8 );
+	}
+	ve_fontcache_shaped_text& shaped = shape_cache ? ve_fontcache_shape_text_cached( cache, font, text_utf8 ) : uncached_shaped;
+
+	return { shaped.end_cursor_pos.x * scalex, shaped.end_cursor_pos.y * scaley };
 }
 
 void ve_fontcache_optimise_drawlist( ve_fontcache* cache )

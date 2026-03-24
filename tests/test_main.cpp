@@ -37,6 +37,7 @@
 #include "test_utf8.cpp"
 #include "test_stress.cpp"
 #include "test_freetype.cpp"
+#include "test_measure.cpp"
 #include "test_set_font_size.cpp"
 #include "test_backend_full.cpp"
 #include "test_lru_erase.cpp"

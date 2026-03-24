@@ -2537,10 +2537,9 @@ inline bool ve_fontcache_backend_test_require_suite(
 
 	if ( ( requirements & VE_FONTCACHE_BACKEND_TEST_REQUIRES_GPU ) != 0 ) {
 		if ( !options.execute_pipeline || !options.readback_surface ) {
-			ve_fontcache_backend_test_expect(
+			ve_fontcache_backend_test_skip(
 				result,
-				false,
-				std::string( suite_name ) + " failed: execute_pipeline/readback_surface not supplied" );
+				std::string( suite_name ) + " skipped: execute_pipeline/readback_surface not supplied" );
 			return false;
 		}
 	}

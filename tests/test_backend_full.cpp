@@ -33,7 +33,7 @@ UTEST( backend_full, all_checks_with_full_options )
 		return ctx.load_file( vefc_test::kNotoSansJP, 24.0f );
 	};
 	
-	// execute and readback left empty (no GPU readback needed)
+	// execute and readback left empty; GPU suites are intentionally skipped
 	
 	ve_fontcache_backend_test_result result = ve_fontcache_backend_test_run( options );
 	

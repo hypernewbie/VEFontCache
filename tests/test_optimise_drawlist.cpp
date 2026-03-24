@@ -1,5 +1,16 @@
 #include "test_common.h"
 
+inline int vefc_test_count_target_passes( const ve_fontcache_drawlist& drawlist )
+{
+	int count = 0;
+	for ( const ve_fontcache_draw& draw : drawlist.dcalls ) {
+		if ( vefc_test::is_target_pass( draw.pass ) && draw.end_index > draw.start_index ) {
+			count++;
+		}
+	}
+	return count;
+}
+
 UTEST( optimise_drawlist, different_colours_not_merged )
 {
 	vefc_test::context ctx;
@@ -21,15 +32,17 @@ UTEST( optimise_drawlist, different_colours_not_merged )
 	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"B" ) );
 
 	auto* drawlist_before = vefc_test::current_drawlist( ctx, false );
-	int target_drawcalls_before = vefc_test::count_pass( *drawlist_before, VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET );
+	int target_drawcalls_before = vefc_test_count_target_passes( *drawlist_before );
+
+	// Warm-cache precondition
+	ASSERT_GE( target_drawcalls_before, 2 );
 
 	// Optimise the drawlist (should NOT merge because colours differ)
 	ve_fontcache_optimise_drawlist( &ctx.cache );
 
 	auto* drawlist_after = vefc_test::current_drawlist( ctx, false );
-	int target_drawcalls_after = vefc_test::count_pass( *drawlist_after, VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET );
+	int target_drawcalls_after = vefc_test_count_target_passes( *drawlist_after );
 
-	EXPECT_GE( target_drawcalls_after, 2 );
 	EXPECT_EQ( target_drawcalls_before, target_drawcalls_after );
 }
 
@@ -51,13 +64,16 @@ UTEST( optimise_drawlist, same_colour_consecutive_draws_merged )
 	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"B" ) );
 
 	auto* drawlist_before = vefc_test::current_drawlist( ctx, false );
-	int target_drawcalls_before = vefc_test::count_pass( *drawlist_before, VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET );
+	int target_drawcalls_before = vefc_test_count_target_passes( *drawlist_before );
+
+	// Warm-cache precondition
+	ASSERT_GE( target_drawcalls_before, 2 );
 
 	// Optimise the drawlist (should merge consecutive same-colour draws)
 	ve_fontcache_optimise_drawlist( &ctx.cache );
 
 	auto* drawlist_after = vefc_test::current_drawlist( ctx, false );
-	int target_drawcalls_after = vefc_test::count_pass( *drawlist_after, VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET );
+	int target_drawcalls_after = vefc_test_count_target_passes( *drawlist_after );
 
 	EXPECT_LT( target_drawcalls_after, target_drawcalls_before );
 }
