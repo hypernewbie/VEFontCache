@@ -2,6 +2,8 @@
 
 VE Font Cache is a single header-only GPU font rendering library designed for game engines.
 
+> WARNING: This is the ai slop branch. It's got more features and tests but contains lots of AI code. Proceed at your own risk.
+
 It aims to:
  * Be fast and simple to integrate.
  * Take advantage of modern GPU power.
