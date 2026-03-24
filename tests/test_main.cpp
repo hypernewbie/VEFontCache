@@ -43,5 +43,7 @@
 #include "test_lru_erase.cpp"
 #include "test_shape_cache_eviction.cpp"
 #include "test_optimise_drawlist.cpp"
+#include "test_lifecycle.cpp"
+#include "test_atlas.cpp"
 
 UTEST_MAIN();

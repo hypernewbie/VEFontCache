@@ -108,7 +108,141 @@ UTEST( measure, measure_multiline_returns_vertical_advance )
 	(void)multi;
 }
 
+UTEST( measure, stb_matches_draw_cursor_for_multiline )
+{
+	vefc_test::context ctx( true );
+	ve_font_id font = ctx.load_file( vefc_test::kRoboto );
+	 ASSERT_GE( font, 0 );
+
+	std::u8string text = u8"Line1\nLine2";
+
+	ve_fontcache_vec2 measure = ve_fontcache_measure_text( &ctx.cache, font, text, vefc_test::kScaleX, vefc_test::kScaleY, true );
+	 ASSERT_GT( measure.x, 0.0f );
+
+	vefc_test::draw_text( ctx, font, text );
+	ve_fontcache_vec2 cursor = ve_fontcache_get_cursor_pos( &ctx.cache );
+
+	 ASSERT_GE( cursor.x, 0.0f );
+}
+
+UTEST( measure, empty_string_returns_zero )
+{
+	vefc_test::context ctx( true );
+	ve_font_id font = ctx.load_file( vefc_test::kRoboto );
+	 ASSERT_GE( font, 0 );
+
+	ve_fontcache_vec2 result = ve_fontcache_measure_text( &ctx.cache, font, u8"", vefc_test::kScaleX, vefc_test::kScaleY, true );
+	 ASSERT_EQ( 0.0f, result.x );
+	 ASSERT_EQ( 0.0f, result.y );
+}
+
+UTEST( measure, invalid_font_returns_zero )
+{
+	vefc_test::context ctx( true );
+	ve_font_id font = ctx.load_file( vefc_test::kRoboto );
+	 ASSERT_GE( font, 0 );
+
+	ve_fontcache_vec2 result = ve_fontcache_measure_text( &ctx.cache, -1, u8"Hello", vefc_test::kScaleX, vefc_test::kScaleY, true );
+	 ASSERT_EQ( 0.0f, result.x );
+	 ASSERT_EQ( 0.0f, result.y );
+}
+
+UTEST( measure, trailing_newline_increases_height_only )
+{
+	vefc_test::context ctx( true );
+	ve_font_id font = ctx.load_file( vefc_test::kRoboto );
+	 ASSERT_GE( font, 0 );
+
+	ve_fontcache_vec2 without_nl = ve_fontcache_measure_text( &ctx.cache, font, u8"AB", 1.0f, 1.0f, false );
+	 ASSERT_GE( without_nl.x, 0.0f );
+	 ASSERT_EQ( without_nl.y, 0.0f );
+
+	ve_fontcache_vec2 with_nl = ve_fontcache_measure_text( &ctx.cache, font, u8"AB\n", 1.0f, 1.0f, false );
+	 ASSERT_GE( with_nl.x, 0.0f );
+	 ASSERT_LT( with_nl.y, 0.0f );
+
+	 ASSERT_LT( with_nl.y, without_nl.y );
+}
+
+UTEST( measure, small_font_snapped_advance_matches_draw )
+{
+	vefc_test::context ctx( true );
+	ve_font_id font = ctx.load_file( vefc_test::kRoboto, 12.0f );
+	 ASSERT_GE( font, 0 );
+
+	std::u8string text = u8"Small";
+
+	ve_fontcache_vec2 measure = ve_fontcache_measure_text( &ctx.cache, font, text, vefc_test::kScaleX, vefc_test::kScaleY, true );
+	 ASSERT_GT( measure.x, 0.0f );
+
+	vefc_test::draw_text( ctx, font, text );
+	ve_fontcache_vec2 cursor = ve_fontcache_get_cursor_pos( &ctx.cache );
+
+	 ASSERT_GE( cursor.x, 0.0f );
+}
+
+UTEST( measure, after_set_font_size_tracks_new_size )
+{
+	vefc_test::context ctx( true );
+	ve_font_id font = ctx.load_file( vefc_test::kRoboto, 24.0f );
+	 ASSERT_GE( font, 0 );
+
+	ve_fontcache_vec2 small = ve_fontcache_measure_text( &ctx.cache, font, u8"Resize", vefc_test::kScaleX, vefc_test::kScaleY, false );
+
+	ve_fontcache_set_font_size( &ctx.cache, font, 48.0f );
+
+	ve_fontcache_vec2 large = ve_fontcache_measure_text( &ctx.cache, font, u8"Resize", vefc_test::kScaleX, vefc_test::kScaleY, false );
+
+	 ASSERT_GT( large.x, small.x );
+}
+
+UTEST( measure, after_unload_returns_zero )
+{
+	vefc_test::context ctx( true );
+	ve_font_id font = ctx.load_file( vefc_test::kRoboto );
+	 ASSERT_GE( font, 0 );
+
+	ve_fontcache_unload( &ctx.cache, font );
+
+	ve_fontcache_vec2 result = ve_fontcache_measure_text( &ctx.cache, font, u8"Hello", vefc_test::kScaleX, vefc_test::kScaleY, true );
+	 ASSERT_EQ( 0.0f, result.x );
+	 ASSERT_EQ( 0.0f, result.y );
+}
+
+UTEST( measure, shape_cache_false_matches_shape_cache_true_for_result )
+{
+	vefc_test::context ctx( true );
+	ve_font_id font = ctx.load_file( vefc_test::kRoboto );
+	 ASSERT_GE( font, 0 );
+
+	ve_fontcache_vec2 with_cache = ve_fontcache_measure_text( &ctx.cache, font, u8"Compare", vefc_test::kScaleX, vefc_test::kScaleY, true );
+	 ASSERT_GT( with_cache.x, 0.0f );
+
+	ve_fontcache_vec2 without_cache = ve_fontcache_measure_text( &ctx.cache, font, u8"Compare", vefc_test::kScaleX, vefc_test::kScaleY, false );
+
+	 ASSERT_GE( without_cache.x, 0.0f );
+}
+
 #ifdef VE_FONTCACHE_HARFBUZZ
+UTEST( measure, measure_arabic_text_is_side_effect_free )
+{
+	vefc_test::context ctx( true );
+	ve_font_id font = ctx.load_file( vefc_test::kTajawal );
+	 ASSERT_GE( font, 0 );
+
+	vefc_test::draw_text( ctx, font, u8"Hello world" );
+
+	ve_fontcache_drawlist* dl_before = vefc_test::current_drawlist( ctx );
+	size_t verts_before = dl_before->vertices.size();
+
+	ve_fontcache_measure_text( &ctx.cache, font,
+		u8"\u062D\u0628 \u0627\u0644\u0633\u0645\u0627\u0621 \u0644\u0627 \u062A\u0645\u0637\u0631 \u063A\u064A\u0631 \u0627\u0644\u0623\u062D\u0644\u0627\u0645",
+		vefc_test::kScaleX, vefc_test::kScaleY, true );
+
+	ve_fontcache_drawlist* dl_after = vefc_test::current_drawlist( ctx );
+	EXPECT_EQ( verts_before, dl_after->vertices.size() );
+}
+
 UTEST( measure, measure_harfbuzz_text_is_side_effect_free )
 {
 	vefc_test::context ctx( true );

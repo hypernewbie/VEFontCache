@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <limits>
 #include <random>
 #include <string>
@@ -44,6 +45,14 @@ inline constexpr const char* kOpenSans = "fonts/OpenSans-Regular.ttf";
 inline constexpr const char* kNotoSansJP = "fonts/NotoSansJP-Regular.otf";
 inline constexpr const char* kNotoSerifSC = "fonts/NotoSerifSC-Regular.otf";
 inline constexpr const char* kTajawal = "fonts/Tajawal-Regular.ttf";
+inline constexpr const char* kDavidLibre = "fonts/DavidLibre-Regular.ttf";
+
+inline std::filesystem::path resolve_font_path( const char* relative_font_path )
+{
+	std::filesystem::path common_h = __FILE__;
+	std::filesystem::path repo_root = common_h.parent_path().parent_path();
+	return repo_root / "demo" / relative_font_path;
+}
 
 inline bool default_use_freetype()
 {
@@ -69,10 +78,11 @@ struct context
 		ve_fontcache_shutdown( &cache );
 	}
 
-	ve_font_id load_file( const char* path, float size_px = 24.0f )
+	ve_font_id load_file( const char* relative_path, float size_px = 24.0f )
 	{
 		buffers.emplace_back();
-		return ve_fontcache_loadfile( &cache, path, buffers.back(), size_px );
+		std::filesystem::path resolved = resolve_font_path( relative_path );
+		return ve_fontcache_loadfile( &cache, resolved.string().c_str(), buffers.back(), size_px );
 	}
 
 	ve_font_id load_buffer_copy( size_t buffer_idx, float size_px = 24.0f )
