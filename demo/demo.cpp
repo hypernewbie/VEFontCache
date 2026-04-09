@@ -19,26 +19,35 @@
 	CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-#ifndef WIN32_LEAN_AND_MEAN
-	#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-	#define NOMINMAX
-#endif
-
 #include <cstdio>
 #include <cassert>
-#include <memory>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <vector>
 #include <glad/glad.h>
 #include <glad/glad.c>
-#include <gl/glu.h>
-#include "TinyWindow.h"
+#include <GLFW/glfw3.h>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <OpenGL/OpenGL.h>
+#include <dlfcn.h>
+#endif
 
 #ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
 	#include <ft2build.h>
@@ -65,14 +74,56 @@ static GLint fontcache_shader_draw_text;
 static GLuint fontcache_fbo[ 2 ]; 
 static GLuint fontcache_fbo_texture[ 2 ];
 static std::vector< GLuint > fonecache_CPU_atlas_textures; // Used with VE_FONTCACHE_FREETYPE_RASTERISATION
-TinyWindow::vec2_t< unsigned int > window_size;
+
+struct demo_window_size
+{
+	unsigned int width = 0;
+	unsigned int height = 0;
+};
+
+static demo_window_size window_size;
 static int mouse_scroll = 0;
+static bool demo_autoscroll = true;
+static bool g_mouse_left_down = false;
+static double g_mouse_x = 0.0;
+static double g_mouse_y = 0.0;
+static GLFWwindow* g_window = nullptr;
+
+static bool g_use_offscreen_context = false;
+static GLuint g_screen_fbo = 0;
+static GLuint g_screen_fbo_texture = 0;
+
+static GLuint target_fb();
+
+#if defined(__APPLE__)
+static void* g_cgl_context = nullptr;
+#endif
 
 static std::filesystem::path current_executable_directory()
 {
-	std::array< char, MAX_PATH > path {};
+#if defined(_WIN32)
+	std::array< char, 4096 > path = {};
 	DWORD length = GetModuleFileNameA( nullptr, path.data(), static_cast< DWORD >( path.size() ) );
 	return std::filesystem::path( std::string( path.data(), length ) ).parent_path();
+#elif defined(__linux__)
+	std::array< char, 4096 > path = {};
+	ssize_t length = readlink( "/proc/self/exe", path.data(), path.size() - 1 );
+	if ( length <= 0 ) {
+		return std::filesystem::current_path();
+	}
+	path[ static_cast< size_t >( length ) ] = '\0';
+	return std::filesystem::path( std::string( path.data(), static_cast< size_t >( length ) ) ).parent_path();
+#elif defined(__APPLE__)
+	uint32_t size = 0;
+	_NSGetExecutablePath( nullptr, &size );
+	std::vector< char > path( size + 1, '\0' );
+	if ( _NSGetExecutablePath( path.data(), &size ) != 0 ) {
+		return std::filesystem::current_path();
+	}
+	return std::filesystem::path( std::string( path.data() ) ).parent_path();
+#else
+	return std::filesystem::current_path();
+#endif
 }
 
 static std::string resolve_demo_asset_path( const char* relative_path )
@@ -188,8 +239,48 @@ static void check_error( int line = -1 )
 {
 	auto err = glGetError();
 	if( err != GL_NO_ERROR ) {
-		printf("%s on line %d\n", gluErrorString( err ), line );
+		const char* err_name = "Unknown OpenGL error";
+		switch ( err ) {
+			case GL_INVALID_ENUM: err_name = "GL_INVALID_ENUM"; break;
+			case GL_INVALID_VALUE: err_name = "GL_INVALID_VALUE"; break;
+			case GL_INVALID_OPERATION: err_name = "GL_INVALID_OPERATION"; break;
+			case GL_OUT_OF_MEMORY: err_name = "GL_OUT_OF_MEMORY"; break;
+			case GL_INVALID_FRAMEBUFFER_OPERATION: err_name = "GL_INVALID_FRAMEBUFFER_OPERATION"; break;
+		}
+		printf("%s on line %d\n", err_name, line );
 		assert( !"stop" );
+	}
+}
+
+static void framebuffer_size_callback( GLFWwindow*, int width, int height )
+{
+	if ( width < 0 || height < 0 ) {
+		return;
+	}
+	window_size.width = static_cast< unsigned int >( width );
+	window_size.height = static_cast< unsigned int >( height );
+}
+
+static void scroll_callback( GLFWwindow*, double, double yoffset )
+{
+	mouse_scroll += yoffset < 0.0 ? 1 : -1;
+	demo_autoscroll = false;
+}
+
+static void cursor_pos_callback( GLFWwindow*, double xpos, double ypos )
+{
+	g_mouse_x = xpos;
+	g_mouse_y = ypos;
+}
+
+static void mouse_button_callback( GLFWwindow* window, int button, int action, int )
+{
+	if ( button != GLFW_MOUSE_BUTTON_LEFT ) {
+		return;
+	}
+	g_mouse_left_down = action == GLFW_PRESS;
+	if ( g_mouse_left_down ) {
+		glfwGetCursorPos( window, &g_mouse_x, &g_mouse_y );
 	}
 }
 
@@ -323,7 +414,7 @@ void fontcache_drawcmd()
 			glDisable( GL_FRAMEBUFFER_SRGB );
 		} else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET || dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_UNCACHED || dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_CPU_CACHED ) {
 			glUseProgram( fontcache_shader_draw_text );
-			glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+			glBindFramebuffer( GL_FRAMEBUFFER, target_fb() );
 			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 			glViewport( 0, 0, window_size.width, window_size.height );
 			glScissor( 0, 0, window_size.width, window_size.height );
@@ -382,8 +473,6 @@ void fontcache_drawcmd()
 }
 
 // ----------------------------------- Demo ----------------------------------
-
-static bool demo_autoscroll = true;
 
 ve_font_id logo_font;
 ve_font_id title_font;
@@ -527,7 +616,7 @@ void init_demo()
 	normalize_demo_font_ids();
 }
 
-void render_demo( TinyWindow::tWindow* window, float dT )
+void render_demo( float dT )
 {
 	ve_fontcache_configure_snap( &cache, window_size.width, window_size.height );
 	static float current_scroll = 0.1f;
@@ -786,17 +875,17 @@ void render_demo( TinyWindow::tWindow* window, float dT )
 	// Smooth scrolling!
 	// printf("%f\n", current_scroll);
 	static float mouse_down_pos = -1.0f, mouse_down_scroll = -1.0f, mouse_prev_pos, scroll_velocity = 0.0f;
-	if ( window->mouseButton[ ( int ) TinyWindow::mouseButton_t::left ] == TinyWindow::buttonState_t::down ) {
+	if ( g_mouse_left_down ) {
 		if ( mouse_down_pos < 0.0f ) {
-			mouse_down_pos = mouse_prev_pos = ( float ) window->mousePosition.y;
+			mouse_down_pos = mouse_prev_pos = ( float ) g_mouse_y;
 			mouse_down_scroll = current_scroll;
 		}
 		demo_autoscroll = false;
-		current_scroll = mouse_down_scroll + ( mouse_down_pos - window->mousePosition.y ) / window_size.height;
+		current_scroll = mouse_down_scroll + ( mouse_down_pos - ( float ) g_mouse_y ) / window_size.height;
 
-		float new_scroll_velocity = ( mouse_prev_pos - window->mousePosition.y ) / window_size.height;
+		float new_scroll_velocity = ( mouse_prev_pos - ( float ) g_mouse_y ) / window_size.height;
 		scroll_velocity = scroll_velocity * 0.2f + new_scroll_velocity * 0.8f;
-		mouse_prev_pos = ( float ) window->mousePosition.y;
+		mouse_prev_pos = ( float ) g_mouse_y;
 	} else {
 		scroll_velocity += mouse_scroll * 0.05f;
 		mouse_down_pos = -1.0f;
@@ -870,6 +959,142 @@ static bool has_flag( int argc, char** argv, const char* flag )
 	return false;
 }
 
+static bool ctest_null_rhi_enabled()
+{
+	const char* value = std::getenv( "CTEST_NULL_RHI" );
+	return value != nullptr && std::strcmp( value, "0" ) != 0 && value[ 0 ] != '\0';
+}
+
+#if defined(__APPLE__)
+
+static bool is_headless_environment()
+{
+	return std::getenv( "SSH_CONNECTION" ) != nullptr
+		|| std::getenv( "SSH_CLIENT" ) != nullptr
+		|| std::getenv( "TMUX" ) != nullptr
+		|| std::getenv( "STY" ) != nullptr;
+}
+
+static void* apple_gl_get_proc_address( const char* name )
+{
+	static void* framework = nullptr;
+	if ( framework == nullptr ) {
+		framework = dlopen( "/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_LAZY );
+	}
+	if ( framework == nullptr ) {
+		return nullptr;
+	}
+	return dlsym( framework, name );
+}
+
+static int create_offscreen_gl_context_apple( unsigned int w, unsigned int h )
+{
+	intptr_t CGLChoosePixelFormatAddr = reinterpret_cast< intptr_t >( apple_gl_get_proc_address( "CGLChoosePixelFormat" ) );
+	intptr_t CGLCreateContextAddr = reinterpret_cast< intptr_t >( apple_gl_get_proc_address( "CGLCreateContext" ) );
+	intptr_t CGLSetCurrentContextAddr = reinterpret_cast< intptr_t >( apple_gl_get_proc_address( "CGLSetCurrentContext" ) );
+	intptr_t CGLDestroyPixelFormatAddr = reinterpret_cast< intptr_t >( apple_gl_get_proc_address( "CGLDestroyPixelFormat" ) );
+	intptr_t CGLDestroyContextAddr = reinterpret_cast< intptr_t >( apple_gl_get_proc_address( "CGLDestroyContext" ) );
+	if ( CGLChoosePixelFormatAddr == 0 || CGLCreateContextAddr == 0 || CGLSetCurrentContextAddr == 0 ) {
+		return 0;
+	}
+	typedef int ( *CGLChoosePixelFormatProc )( const CGLPixelFormatAttribute*, CGLPixelFormatObj*, int32_t* );
+	typedef int ( *CGLCreateContextProc )( CGLPixelFormatObj, CGLContextObj, CGLContextObj* );
+	typedef int ( *CGLSetCurrentContextProc )( CGLContextObj );
+	typedef int ( *CGLDestroyPixelFormatProc )( CGLPixelFormatObj );
+	typedef int ( *CGLDestroyContextProc )( CGLContextObj );
+	CGLChoosePixelFormatProc CGLChoosePixelFormat = reinterpret_cast< CGLChoosePixelFormatProc >( CGLChoosePixelFormatAddr );
+	CGLCreateContextProc CGLCreateContext = reinterpret_cast< CGLCreateContextProc >( CGLCreateContextAddr );
+	CGLSetCurrentContextProc CGLSetCurrentContext = reinterpret_cast< CGLSetCurrentContextProc >( CGLSetCurrentContextAddr );
+	CGLDestroyPixelFormatProc CGLDestroyPixelFormat = reinterpret_cast< CGLDestroyPixelFormatProc >( CGLDestroyPixelFormatAddr );
+	CGLDestroyContextProc CGLDestroyContext = reinterpret_cast< CGLDestroyContextProc >( CGLDestroyContextAddr );
+	CGLPixelFormatAttribute attribs[] = {
+		kCGLPFAClosestPolicy,
+		kCGLPFAAllowOfflineRenderers,
+		( CGLPixelFormatAttribute ) kCGLPFAColorSize, ( CGLPixelFormatAttribute ) 24,
+		( CGLPixelFormatAttribute ) kCGLPFAAlphaSize, ( CGLPixelFormatAttribute ) 8,
+		( CGLPixelFormatAttribute ) kCGLPFAAccelerated,
+		( CGLPixelFormatAttribute ) kCGLPFANoRecovery,
+		( CGLPixelFormatAttribute ) 0
+	};
+	CGLPixelFormatObj pixel_format = nullptr;
+	int32_t num_pixel_formats = 0;
+	if ( ( *CGLChoosePixelFormat )( attribs, &pixel_format, &num_pixel_formats ) != 0 || pixel_format == nullptr ) {
+		return 0;
+	}
+	if ( ( *CGLCreateContext )( pixel_format, nullptr, ( CGLContextObj* )&g_cgl_context ) != 0 || g_cgl_context == nullptr ) {
+		if ( CGLDestroyPixelFormat != nullptr ) {
+			( *CGLDestroyPixelFormat )( pixel_format );
+		}
+		return 0;
+	}
+	if ( ( *CGLSetCurrentContext )( ( CGLContextObj )g_cgl_context ) != 0 ) {
+		return 0;
+	}
+	if ( CGLDestroyPixelFormat != nullptr ) {
+		( *CGLDestroyPixelFormat )( pixel_format );
+	}
+	window_size.width = w;
+	window_size.height = h;
+	g_use_offscreen_context = true;
+	return 1;
+}
+
+static void destroy_offscreen_gl_context_apple()
+{
+	if ( g_cgl_context != nullptr ) {
+		intptr_t CGLSetCurrentContext = reinterpret_cast< intptr_t >( apple_gl_get_proc_address( "CGLSetCurrentContext" ) );
+		intptr_t CGLDestroyContext = reinterpret_cast< intptr_t >( apple_gl_get_proc_address( "CGLDestroyContext" ) );
+		if ( CGLSetCurrentContext != 0 ) {
+			typedef int ( *CGLSetCurrentContextProc )( CGLContextObj );
+			( reinterpret_cast< CGLSetCurrentContextProc >( CGLSetCurrentContext ) )( nullptr );
+		}
+		if ( CGLDestroyContext != 0 ) {
+			typedef int ( *CGLDestroyContextProc )( CGLContextObj );
+			( reinterpret_cast< CGLDestroyContextProc >( CGLDestroyContext ) )( ( CGLContextObj )g_cgl_context );
+		}
+		g_cgl_context = nullptr;
+	}
+	g_use_offscreen_context = false;
+}
+
+static void setup_screen_fbo( unsigned int w, unsigned int h )
+{
+	glGenFramebuffers( 1, &g_screen_fbo );
+	glGenTextures( 1, &g_screen_fbo_texture );
+	glBindTexture( GL_TEXTURE_2D, g_screen_fbo_texture );
+	glTexImage2D( GL_TEXTURE_2D, 0, GL_R8, static_cast< GLsizei >( w ), static_cast< GLsizei >( h ), 0, GL_RED, GL_UNSIGNED_BYTE, nullptr );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	glBindFramebuffer( GL_FRAMEBUFFER, g_screen_fbo );
+	glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_screen_fbo_texture, 0 );
+	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+}
+
+static void destroy_screen_fbo()
+{
+	if ( g_screen_fbo_texture != 0 ) {
+		glDeleteTextures( 1, &g_screen_fbo_texture );
+		g_screen_fbo_texture = 0;
+	}
+	if ( g_screen_fbo != 0 ) {
+		glDeleteFramebuffers( 1, &g_screen_fbo );
+		g_screen_fbo = 0;
+	}
+}
+
+static GLuint target_fb()
+{
+	return g_use_offscreen_context ? g_screen_fbo : 0;
+}
+#else
+static bool is_headless_environment() { return false; }
+static void* apple_gl_get_proc_address( const char* name ) { return nullptr; }
+static void destroy_screen_fbo() {}
+static GLuint target_fb() { return 0; }
+#endif // __APPLE__
+
 static void clear_framebuffer_colour( GLuint framebuffer )
 {
 	glBindFramebuffer( GL_FRAMEBUFFER, framebuffer );
@@ -877,8 +1102,8 @@ static void clear_framebuffer_colour( GLuint framebuffer )
 	glViewport(
 		0,
 		0,
-		framebuffer == 0 ? static_cast< GLsizei >( window_size.width ) : ( framebuffer == fontcache_fbo[ 0 ] ? VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH : VE_FONTCACHE_ATLAS_WIDTH ),
-		framebuffer == 0 ? static_cast< GLsizei >( window_size.height ) : ( framebuffer == fontcache_fbo[ 0 ] ? VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT : VE_FONTCACHE_ATLAS_HEIGHT ) );
+		framebuffer == 0 || framebuffer == g_screen_fbo ? static_cast< GLsizei >( window_size.width ) : ( framebuffer == fontcache_fbo[ 0 ] ? VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH : VE_FONTCACHE_ATLAS_WIDTH ),
+		framebuffer == 0 || framebuffer == g_screen_fbo ? static_cast< GLsizei >( window_size.height ) : ( framebuffer == fontcache_fbo[ 0 ] ? VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT : VE_FONTCACHE_ATLAS_HEIGHT ) );
 	glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
 	glClear( GL_COLOR_BUFFER_BIT );
 }
@@ -887,7 +1112,7 @@ static void clear_backend_test_surfaces( bool clear_cpu_atlas_pages = true )
 {
 	clear_framebuffer_colour( fontcache_fbo[ 0 ] );
 	clear_framebuffer_colour( fontcache_fbo[ 1 ] );
-	clear_framebuffer_colour( 0 );
+	clear_framebuffer_colour( target_fb() );
 #ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
 	if ( clear_cpu_atlas_pages && !fonecache_CPU_atlas_textures.empty() ) {
 		static std::vector< uint8_t > zeros( static_cast< size_t >( VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE ) * VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE, 0 );
@@ -1041,8 +1266,8 @@ static bool backend_test_readback( const char* name, int x, int y, int w, int h,
 		std::strcmp( name, "target" ) == 0
 		|| std::strcmp( name, "target_linear" ) == 0
 		|| std::strcmp( name, "presented" ) == 0 ) {
-		glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
-		glReadBuffer( GL_BACK );
+		glBindFramebuffer( GL_READ_FRAMEBUFFER, target_fb() );
+		glReadBuffer( g_use_offscreen_context ? GL_COLOR_ATTACHMENT0 : GL_BACK );
 		glReadPixels( x, y, w, h, GL_RED, GL_UNSIGNED_BYTE, out_pixels );
 #ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
 	} else if ( std::strcmp( name, "cpu_atlas_page_0" ) == 0 ) {
@@ -1062,7 +1287,7 @@ static bool backend_test_readback( const char* name, int x, int y, int w, int h,
 
 static void backend_test_execute_pipeline()
 {
-	clear_framebuffer_colour( 0 );
+	clear_framebuffer_colour( target_fb() );
 	fontcache_drawcmd();
 	glFinish();
 }
@@ -1276,23 +1501,88 @@ static int run_backend_test_mode()
 int main( int argc, char** argv )
 {
 	const bool test_mode = has_flag( argc, argv, "--test" );
-	TinyWindow::windowSetting_t cfg;
-	cfg.name = "VEFontCache"; cfg.versionMajor = 3; cfg.versionMinor = 3; cfg.enableSRGB = false;
-	cfg.SetProfile( TinyWindow::profile_t::core );
-	cfg.resolution.width = 1980; cfg.resolution.height = 1080;
-	cfg.startHidden = test_mode;
-	std::unique_ptr< TinyWindow::windowManager > manager( new TinyWindow::windowManager() );
-	std::unique_ptr< TinyWindow::tWindow > window( manager->AddWindow( cfg ) );
-	window_size = window->settings.resolution;
+	if ( test_mode && ctest_null_rhi_enabled() ) {
+		printf( "Skipping OpenGL backend test because CTEST_NULL_RHI is enabled.\n" );
+		return 125;
+	}
 
-	// Handle window events.
-	manager->mouseWheelEvent = [&]( TinyWindow::tWindow* window, TinyWindow::mouseScroll_t mouseScrollDirection ) {
-		mouse_scroll += mouseScrollDirection == TinyWindow::mouseScroll_t::down ? 1 : -1;
-		demo_autoscroll = false;
-	};
+#if defined(__APPLE__)
+	if ( test_mode && is_headless_environment() ) {
+		int result = create_offscreen_gl_context_apple( 1980, 1080 );
+		if ( result == 0 ) {
+			printf( "Failed to create offscreen CGL context.\n" );
+			return 1;
+		}
+		if ( !gladLoadGLLoader( (GLADloadproc) apple_gl_get_proc_address ) ) {
+			printf( "Failed to load OpenGL via CGL.\n" );
+			destroy_offscreen_gl_context_apple();
+			return 1;
+		}
+		PFNGLGETSTRINGPROC glGetStringFunc = (PFNGLGETSTRINGPROC)(void*)apple_gl_get_proc_address( "glGetString" );
+		if ( glGetStringFunc ) {
+			const char* gl_version = (const char*)glGetStringFunc( GL_VERSION );
+			if ( gl_version && gl_version[0] < '3' ) {
+				printf( "Headless CGL GL_VERSION=%s < 3.0, skipping test.\n", gl_version );
+				destroy_offscreen_gl_context_apple();
+				return 125;
+			}
+		}
+		fontcache_shader_render_glyph = compile_shader( vs_source_shared, fs_source_render_glyph );
+		fontcache_shader_blit_atlas = compile_shader( vs_source_shared, fs_source_blit_atlas );
+		fontcache_shader_draw_text = compile_shader( vs_source_draw_text, fs_source_draw_text );
+		setup_fbo();
+		setup_screen_fbo( window_size.width, window_size.height );
+		int exit_code = run_backend_test_mode();
+		destroy_screen_fbo();
+		destroy_offscreen_gl_context_apple();
+		return exit_code;
+	}
+#endif
+
+	if ( !glfwInit() ) {
+		printf( "Failed to initialise GLFW.\n" );
+		return 1;
+	}
+
+	glfwWindowHint( GLFW_CONTEXT_VERSION_MAJOR, 3 );
+	glfwWindowHint( GLFW_CONTEXT_VERSION_MINOR, 3 );
+	glfwWindowHint( GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE );
+#if defined(__APPLE__)
+	glfwWindowHint( GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE );
+#endif
+	glfwWindowHint( GLFW_VISIBLE, test_mode ? GLFW_FALSE : GLFW_TRUE );
+
+	g_window = glfwCreateWindow( 1980, 1080, "VEFontCache", nullptr, nullptr );
+	if ( !g_window ) {
+		printf( "Failed to create a GLFW window.\n" );
+		glfwTerminate();
+		return 1;
+	}
+
+	glfwMakeContextCurrent( g_window );
+	glfwSetFramebufferSizeCallback( g_window, framebuffer_size_callback );
+	glfwSetScrollCallback( g_window, scroll_callback );
+	glfwSetCursorPosCallback( g_window, cursor_pos_callback );
+	glfwSetMouseButtonCallback( g_window, mouse_button_callback );
+
+	int framebuffer_width = 0;
+	int framebuffer_height = 0;
+	glfwGetFramebufferSize( g_window, &framebuffer_width, &framebuffer_height );
+	if ( framebuffer_width <= 0 || framebuffer_height <= 0 ) {
+		framebuffer_width = 1980;
+		framebuffer_height = 1080;
+	}
+	window_size.width = static_cast< unsigned int >( framebuffer_width );
+	window_size.height = static_cast< unsigned int >( framebuffer_height );
 
 	// Set up GPU resources.
-	gladLoadGL();
+	if ( !gladLoadGLLoader( (GLADloadproc) glfwGetProcAddress ) ) {
+		printf( "Failed to load OpenGL via glad.\n" );
+		glfwDestroyWindow( g_window );
+		g_window = nullptr;
+		glfwTerminate();
+		return 1;
+	}
 	fontcache_shader_render_glyph = compile_shader( vs_source_shared, fs_source_render_glyph );
 	fontcache_shader_blit_atlas = compile_shader( vs_source_shared, fs_source_blit_atlas );
 	fontcache_shader_draw_text = compile_shader( vs_source_draw_text, fs_source_draw_text );
@@ -1315,30 +1605,37 @@ int main( int argc, char** argv )
 
 	if ( test_mode ) {
 		int exit_code = run_backend_test_mode();
-		manager->ShutDown();
-		window.reset( nullptr );
+		glfwDestroyWindow( g_window );
+		g_window = nullptr;
+		glfwTerminate();
 		return exit_code;
 	}
 
 	init_demo();
-	while( !window->shouldClose ) {
-		manager->PollForEvents();
-		window_size = window->settings.resolution;
+	while( !glfwWindowShouldClose( g_window ) ) {
+		glfwPollEvents();
+		glfwGetFramebufferSize( g_window, &framebuffer_width, &framebuffer_height );
+		window_size.width = static_cast< unsigned int >( std::max( framebuffer_width, 0 ) );
+		window_size.height = static_cast< unsigned int >( std::max( framebuffer_height, 0 ) );
+		if ( window_size.width == 0 || window_size.height == 0 ) {
+			continue;
+		}
 
 		glBindFramebuffer( GL_FRAMEBUFFER, 0 );
 		glEnable( GL_FRAMEBUFFER_SRGB );
 		glClearColor( 0.18f * 0.18f, 0.204f * 0.204f, 0.251f * 0.251f, 1.0f );
 		glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
 		
-		render_demo( window.get(), 1.0f / 60.0f );
+		render_demo( 1.0f / 60.0f );
 		fontcache_drawcmd();
 
-		window->SwapDrawBuffers();
+		glfwSwapBuffers( g_window );
 	}
 
 	ve_fontcache_shutdown( &cache );
-	manager->ShutDown();
-	window.reset( nullptr );
+	glfwDestroyWindow( g_window );
+	g_window = nullptr;
+	glfwTerminate();
 	return 0;
 }
 
