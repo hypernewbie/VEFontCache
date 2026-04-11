@@ -721,7 +721,10 @@ static void ve_fontcache_invalidate_font_from_LRU( ve_fontcache_LRU& LRU, ve_fon
 ve_font_id ve_fontcache_load( ve_fontcache* cache, const void* data, size_t data_size, float size_px )
 {
 	STBTT_assert( cache );
-	if ( !data  ) return -1;
+	if ( !data ) return -1;
+	// stbtt_InitFont reads num_tables at data+4 (2 bytes), so we need >= 6 bytes
+	// to avoid a heap-buffer-overflow read on very small/truncated buffers.
+	if ( data_size < 6 ) return -1;
 
 	// Allocate cache entry.
 	int id = -1;

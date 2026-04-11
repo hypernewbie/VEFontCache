@@ -76,7 +76,10 @@ UTEST( lifecycle, load_invalid_truncated_buffer_consumes_entry_slot )
 	ve_font_id font_before = ctx.load_file( vefc_test::kRoboto );
 	 ASSERT_GE( font_before, 0 );
 
-	std::vector< uint8_t > bad_buffer = { 0x00, 0x01, 0x02, 0x03 };
+	// Must be >= 6 bytes so stbtt_InitFont can safely read the num_tables
+	// field at data+4 without a heap-buffer-overflow. With all bytes zero,
+	// num_tables=0 so no further reads occur and the function fails cleanly.
+	std::vector< uint8_t > bad_buffer( 16, 0 );
 	ve_font_id bad_font = ve_fontcache_load( &ctx.cache, bad_buffer.data(), bad_buffer.size(), 24.0f );
 	 ASSERT_EQ( -1, bad_font );
 
