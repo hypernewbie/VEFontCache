@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.21)
 
+if(POLICY CMP0091)
+    cmake_policy(SET CMP0091 NEW)
+endif()
+
 project(VEFontCache LANGUAGES C CXX)
 
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
@@ -22,6 +26,7 @@ set(VRHI_VERSION "v0.1.4" CACHE STRING "VRHI release version to fetch")
 include(FetchContent)
 
 if(VEFC_ENABLE_FREETYPE)
+    set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
     FetchContent_Declare(
         freetype
         GIT_REPOSITORY https://github.com/freetype/freetype.git
@@ -30,10 +35,13 @@ if(VEFC_ENABLE_FREETYPE)
     if(POLICY CMP0077)
         cmake_policy(SET CMP0077 NEW)
     endif()
+    set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
     FetchContent_MakeAvailable(freetype)
+    unset(CMAKE_POLICY_DEFAULT_CMP0091)
 endif()
 
 if(VEFC_ENABLE_HARFBUZZ)
+    set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
     FetchContent_Declare(
         harfbuzz
         GIT_REPOSITORY https://github.com/harfbuzz/harfbuzz.git
@@ -41,6 +49,7 @@ if(VEFC_ENABLE_HARFBUZZ)
     )
     set(HB_BUILD_SUBSET OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(harfbuzz)
+    unset(CMAKE_POLICY_DEFAULT_CMP0091)
 endif()
 
 if(VEFC_BUILD_DEMO OR VEFC_BUILD_VRHI)
