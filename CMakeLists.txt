@@ -194,6 +194,10 @@ function(vefc_apply_common_options target)
     target_compile_features(${target} PRIVATE cxx_std_20)
     target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+    if(WIN32)
+        target_compile_definitions(${target} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    endif()
+
     if(MSVC OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC"))
         target_compile_options(${target} PRIVATE /utf-8)
     endif()
