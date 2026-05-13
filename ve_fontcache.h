@@ -1666,6 +1666,7 @@ static ve_fontcache_shaped_text& ve_fontcache_shape_text_cached( ve_fontcache* c
 	uint64_t hash = 0x9f8e00d51d263c24ULL;
 	ve_fontcache_ELFhash64( hash, ( const uint8_t* ) text_utf8.data(), text_utf8.size() );
 	ve_fontcache_ELFhash64( hash, &font );
+	ve_fontcache_ELFhash64( hash, &cache->entry[ font ].size );
 
 	ve_fontcache_LRU& state = cache->shape_cache.state;
 	int shape_cache_idx = ve_fontcache_LRU_get( state, hash );
