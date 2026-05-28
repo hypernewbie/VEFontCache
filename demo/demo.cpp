@@ -73,6 +73,7 @@ static GLint fontcache_shader_blit_atlas;
 static GLint fontcache_shader_draw_text;
 static GLuint fontcache_fbo[ 2 ]; 
 static GLuint fontcache_fbo_texture[ 2 ];
+static GLuint fontcache_stencil_rb;
 static std::vector< GLuint > fonecache_CPU_atlas_textures; // Used with VE_FONTCACHE_FREETYPE_RASTERISATION
 
 struct demo_window_size
@@ -326,6 +327,17 @@ void setup_fbo()
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 	glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fontcache_fbo_texture[ 0 ], 0 );
 
+	// Add stencil renderbuffer for non-zero winding fill.
+	glGenRenderbuffers( 1, &fontcache_stencil_rb );
+	glBindRenderbuffer( GL_RENDERBUFFER, fontcache_stencil_rb );
+	glRenderbufferStorage( GL_RENDERBUFFER, GL_STENCIL_INDEX8, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT );
+	glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, fontcache_stencil_rb );
+
+	// Initial clear to zero both color and stencil.
+	glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
+	glClearStencil( 0 );
+	glClear( GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
+
 	glBindFramebuffer( GL_FRAMEBUFFER, fontcache_fbo[ 1 ] );
 	glBindTexture( GL_TEXTURE_2D, fontcache_fbo_texture[ 1 ] );
 	glTexImage2D( GL_TEXTURE_2D, 0, GL_R8, VE_FONTCACHE_ATLAS_WIDTH, VE_FONTCACHE_ATLAS_HEIGHT, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr );
@@ -397,13 +409,36 @@ void fontcache_drawcmd()
 		if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH ) {
 			glUseProgram( fontcache_shader_render_glyph );
 			glBindFramebuffer( GL_FRAMEBUFFER, fontcache_fbo[ 0 ] );
-			glBlendFunc( GL_ONE_MINUS_DST_COLOR, GL_ONE_MINUS_SRC_COLOR );
+			glDisable( GL_DEPTH_TEST );
+			glDisable( GL_BLEND );
+			glEnable( GL_STENCIL_TEST );
+			glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+			glStencilMask( 0xFF );
+			glStencilFunc( GL_ALWAYS, 0, 0xFF );
+			glStencilOpSeparate( GL_FRONT, GL_KEEP, GL_KEEP, GL_INCR_WRAP );
+			glStencilOpSeparate( GL_BACK,  GL_KEEP, GL_KEEP, GL_DECR_WRAP );
+			glViewport( 0, 0, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT );
+			glScissor( 0, 0, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT );
+			glDisable( GL_FRAMEBUFFER_SRGB );
+		} else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE ) {
+			glUseProgram( fontcache_shader_render_glyph );
+			glBindFramebuffer( GL_FRAMEBUFFER, fontcache_fbo[ 0 ] );
+			glDisable( GL_DEPTH_TEST );
+			glDisable( GL_BLEND );
+			glEnable( GL_STENCIL_TEST );
+			glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+			glStencilMask( 0xFF );
+			glStencilFunc( GL_NOTEQUAL, 0, 0xFF );
+			glStencilOp( GL_KEEP, GL_KEEP, GL_ZERO );
 			glViewport( 0, 0, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT );
 			glScissor( 0, 0, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT );
 			glDisable( GL_FRAMEBUFFER_SRGB );
 		} else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS ) {
 			glUseProgram( fontcache_shader_blit_atlas );
 			glBindFramebuffer( GL_FRAMEBUFFER, fontcache_fbo[ 1 ] );
+			glDisable( GL_STENCIL_TEST );
+			glEnable( GL_BLEND );
+			glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 			glViewport( 0, 0, VE_FONTCACHE_ATLAS_WIDTH, VE_FONTCACHE_ATLAS_HEIGHT );
 			glScissor( 0, 0, VE_FONTCACHE_ATLAS_WIDTH, VE_FONTCACHE_ATLAS_HEIGHT );
@@ -415,6 +450,9 @@ void fontcache_drawcmd()
 		} else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET || dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_UNCACHED || dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_CPU_CACHED ) {
 			glUseProgram( fontcache_shader_draw_text );
 			glBindFramebuffer( GL_FRAMEBUFFER, target_fb() );
+			glDisable( GL_STENCIL_TEST );
+			glEnable( GL_BLEND );
+			glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 			glViewport( 0, 0, window_size.width, window_size.height );
 			glScissor( 0, 0, window_size.width, window_size.height );
@@ -458,7 +496,15 @@ void fontcache_drawcmd()
         }
 		if ( dcall.clear_before_draw ) {
 			glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
-			glClear( GL_COLOR_BUFFER_BIT );
+			if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH ) {
+				glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+				glStencilMask( 0xFF );
+				glClearStencil( 0 );
+				glClear( GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
+				glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+			} else {
+				glClear( GL_COLOR_BUFFER_BIT );
+			}
 		}
 		if ( dcall.end_index - dcall.start_index == 0 )
 			continue;
@@ -1111,6 +1157,9 @@ static void clear_framebuffer_colour( GLuint framebuffer )
 static void clear_backend_test_surfaces( bool clear_cpu_atlas_pages = true )
 {
 	clear_framebuffer_colour( fontcache_fbo[ 0 ] );
+	glBindFramebuffer( GL_FRAMEBUFFER, fontcache_fbo[ 0 ] );
+	glClearStencil( 0 );
+	glClear( GL_STENCIL_BUFFER_BIT );
 	clear_framebuffer_colour( fontcache_fbo[ 1 ] );
 	clear_framebuffer_colour( target_fb() );
 #ifdef VE_FONTCACHE_FREETYPE_RASTERISATION

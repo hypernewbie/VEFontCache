@@ -601,6 +601,9 @@ static void vrhi_build_state_templates()
     g_state_clear_template = {};
     g_state_clear_template.SetStateFlags( colour_write | VRHI_STATE_CULL_NONE | VRHI_STATE_PT_TRIANGLES );
 
+    // TODO: VRHI backend still uses XOR/even-odd fill. Needs migration to
+    // stencil non-zero winding (GLYPH_RESOLVE pass + two-sided stencil INCR/DECR)
+    // before this backend renders overlapping-contour fonts correctly.
     g_state_glyph_template = {};
     g_state_glyph_template
         .SetProgram( g_program_glyph )
@@ -1004,7 +1007,10 @@ static void fontcache_drawcmd()
         vhStateId state_id = 0;
         bool known_pass = true;
 
-        if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH ) {
+        if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE ) {
+            // VRHI backend pending stencil migration; skip resolve draws for now.
+            continue;
+        } else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH ) {
             state = g_state_glyph_template;
             state_id = VEFC_VRHI_STATE_GLYPH;
             vrhi_prepare_fixed_surface( state, g_glyph_buffer );

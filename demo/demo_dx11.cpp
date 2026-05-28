@@ -138,12 +138,17 @@ static ID3D11PixelShader* g_ps_draw_text = nullptr;
 static ID3D11InputLayout* g_input_layout_shared = nullptr;
 static ID3D11InputLayout* g_input_layout_blit_atlas = nullptr;
 static ID3D11InputLayout* g_input_layout_draw_text = nullptr;
-static ID3D11BlendState* g_blend_xor = nullptr;
 static ID3D11BlendState* g_blend_alpha = nullptr;
+static ID3D11BlendState* g_blend_no_colour = nullptr;
 static ID3D11SamplerState* g_point_sampler = nullptr;
 static ID3D11RasterizerState* g_rasterizer_state = nullptr;
 static ID3D11Buffer* g_cb_blit_atlas = nullptr;
 static ID3D11Buffer* g_cb_draw_text = nullptr;
+static ID3D11Texture2D* g_glyph_stencil_texture = nullptr;
+static ID3D11DepthStencilView* g_glyph_dsv = nullptr;
+static ID3D11DepthStencilState* g_ds_glyph_accumulate = nullptr;
+static ID3D11DepthStencilState* g_ds_glyph_resolve = nullptr;
+static ID3D11DepthStencilState* g_ds_disabled = nullptr;
 static bool g_dx11_test_mode = false;
 static void DX_CHECK_IMPL( HRESULT hr, int line )
 {
@@ -466,10 +471,10 @@ static ID3D11RenderTargetView* dx11_current_backbuffer_rtv()
 return g_dx11_test_mode ? g_backbuffer_rtv_linear : g_backbuffer_rtv_srgb;
 }
 
-static void dx11_set_render_target( ID3D11RenderTargetView* rtv, UINT width, UINT height )
+static void dx11_set_render_target( ID3D11RenderTargetView* rtv, UINT width, UINT height, ID3D11DepthStencilView* dsv = nullptr )
 {
 dx11_unbind_ps_srv0();
-g_context->OMSetRenderTargets( 1, &rtv, nullptr );
+g_context->OMSetRenderTargets( 1, &rtv, dsv );
 	D3D11_VIEWPORT vp = {};
 	vp.TopLeftX = 0.0f;
 	vp.TopLeftY = 0.0f;
@@ -812,17 +817,6 @@ g_ps_render_glyph = dx11_compile_pixel_shader( g_ps_source_render_glyph, "ps_ren
 g_ps_blit_atlas = dx11_compile_pixel_shader( g_ps_source_blit_atlas, "ps_blit_atlas" );
 g_ps_draw_text = dx11_compile_pixel_shader( g_ps_source_draw_text, "ps_draw_text" );
 
-D3D11_BLEND_DESC blend_xor = {};
-blend_xor.RenderTarget[ 0 ].BlendEnable = TRUE;
-blend_xor.RenderTarget[ 0 ].SrcBlend = D3D11_BLEND_INV_DEST_COLOR;
-blend_xor.RenderTarget[ 0 ].DestBlend = D3D11_BLEND_INV_SRC_COLOR;
-blend_xor.RenderTarget[ 0 ].BlendOp = D3D11_BLEND_OP_ADD;
-blend_xor.RenderTarget[ 0 ].SrcBlendAlpha = D3D11_BLEND_INV_DEST_ALPHA;
-blend_xor.RenderTarget[ 0 ].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
-blend_xor.RenderTarget[ 0 ].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-blend_xor.RenderTarget[ 0 ].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-DX_CHECK( g_device->CreateBlendState( &blend_xor, &g_blend_xor ) );
-
 D3D11_BLEND_DESC blend_alpha = {};
 blend_alpha.RenderTarget[ 0 ].BlendEnable = TRUE;
 blend_alpha.RenderTarget[ 0 ].SrcBlend = D3D11_BLEND_SRC_ALPHA;
@@ -833,6 +827,46 @@ blend_alpha.RenderTarget[ 0 ].DestBlendAlpha = D3D11_BLEND_ZERO;
 blend_alpha.RenderTarget[ 0 ].BlendOpAlpha = D3D11_BLEND_OP_ADD;
 blend_alpha.RenderTarget[ 0 ].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 DX_CHECK( g_device->CreateBlendState( &blend_alpha, &g_blend_alpha ) );
+
+D3D11_BLEND_DESC blend_no_colour = {};
+blend_no_colour.RenderTarget[ 0 ].BlendEnable = FALSE;
+blend_no_colour.RenderTarget[ 0 ].RenderTargetWriteMask = 0;
+DX_CHECK( g_device->CreateBlendState( &blend_no_colour, &g_blend_no_colour ) );
+
+D3D11_DEPTH_STENCIL_DESC ds_accumulate = {};
+ds_accumulate.DepthEnable = FALSE;
+ds_accumulate.StencilEnable = TRUE;
+ds_accumulate.StencilReadMask = 0xFF;
+ds_accumulate.StencilWriteMask = 0xFF;
+ds_accumulate.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+ds_accumulate.FrontFace.StencilPassOp = D3D11_STENCIL_OP_INCR;
+ds_accumulate.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+ds_accumulate.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+ds_accumulate.BackFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+ds_accumulate.BackFace.StencilPassOp = D3D11_STENCIL_OP_DECR;
+ds_accumulate.BackFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+ds_accumulate.BackFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+DX_CHECK( g_device->CreateDepthStencilState( &ds_accumulate, &g_ds_glyph_accumulate ) );
+
+D3D11_DEPTH_STENCIL_DESC ds_resolve = {};
+ds_resolve.DepthEnable = FALSE;
+ds_resolve.StencilEnable = TRUE;
+ds_resolve.StencilReadMask = 0xFF;
+ds_resolve.StencilWriteMask = 0xFF;
+ds_resolve.FrontFace.StencilFunc = D3D11_COMPARISON_NOT_EQUAL;
+ds_resolve.FrontFace.StencilPassOp = D3D11_STENCIL_OP_ZERO;
+ds_resolve.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+ds_resolve.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+ds_resolve.BackFace.StencilFunc = D3D11_COMPARISON_NOT_EQUAL;
+ds_resolve.BackFace.StencilPassOp = D3D11_STENCIL_OP_ZERO;
+ds_resolve.BackFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+ds_resolve.BackFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+DX_CHECK( g_device->CreateDepthStencilState( &ds_resolve, &g_ds_glyph_resolve ) );
+
+D3D11_DEPTH_STENCIL_DESC ds_disabled = {};
+ds_disabled.DepthEnable = FALSE;
+ds_disabled.StencilEnable = FALSE;
+DX_CHECK( g_device->CreateDepthStencilState( &ds_disabled, &g_ds_disabled ) );
 
 D3D11_SAMPLER_DESC sampler_desc = {};
 sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
@@ -855,11 +889,29 @@ g_cb_draw_text = dx11_create_dynamic_buffer( sizeof( dx11_draw_text_cb ), D3D11_
 
 	dx11_create_texture_target( VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT, DXGI_FORMAT_R8G8B8A8_UNORM, g_glyph_buffer );
 	dx11_create_texture_target( VE_FONTCACHE_ATLAS_WIDTH, VE_FONTCACHE_ATLAS_HEIGHT, DXGI_FORMAT_R8G8B8A8_UNORM, g_atlas );
+
+	D3D11_TEXTURE2D_DESC stencil_desc = {};
+	stencil_desc.Width = VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH;
+	stencil_desc.Height = VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT;
+	stencil_desc.MipLevels = 1;
+	stencil_desc.ArraySize = 1;
+	stencil_desc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	stencil_desc.SampleDesc.Count = 1;
+	stencil_desc.Usage = D3D11_USAGE_DEFAULT;
+	stencil_desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+	DX_CHECK( g_device->CreateTexture2D( &stencil_desc, nullptr, &g_glyph_stencil_texture ) );
+	DX_CHECK( g_device->CreateDepthStencilView( g_glyph_stencil_texture, nullptr, &g_glyph_dsv ) );
 }
 
 static void dx11_destroy()
 {
 dx11_release_cpu_atlas_pages();
+dx11_release( g_glyph_dsv );
+dx11_release( g_glyph_stencil_texture );
+dx11_release( g_ds_disabled );
+dx11_release( g_ds_glyph_resolve );
+dx11_release( g_ds_glyph_accumulate );
+dx11_release( g_blend_no_colour );
 dx11_release_texture_target( g_atlas );
 dx11_release_texture_target( g_glyph_buffer );
 dx11_release( g_cb_draw_text );
@@ -867,7 +919,6 @@ dx11_release( g_cb_blit_atlas );
 dx11_release( g_rasterizer_state );
 dx11_release( g_point_sampler );
 dx11_release( g_blend_alpha );
-dx11_release( g_blend_xor );
 dx11_release( g_input_layout_draw_text );
 dx11_release( g_input_layout_blit_atlas );
 dx11_release( g_input_layout_shared );
@@ -923,14 +974,23 @@ g_context->PSSetSamplers( 0, 1, &g_point_sampler );
 const float blend_factor[ 4 ] = { 0.0f, 0.0f, 0.0f, 0.0f };
 for ( ve_fontcache_draw& dcall : drawlist->dcalls ) {
 		if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH ) {
-			dx11_set_render_target( g_glyph_buffer.rtv, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT );
-			g_context->OMSetBlendState( g_blend_xor, blend_factor, 0xFFFFFFFFu );
+			dx11_set_render_target( g_glyph_buffer.rtv, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT, g_glyph_dsv );
+			g_context->OMSetBlendState( g_blend_no_colour, blend_factor, 0xFFFFFFFFu );
+			g_context->OMSetDepthStencilState( g_ds_glyph_accumulate, 0 );
+			g_context->IASetInputLayout( g_input_layout_shared );
+			g_context->VSSetShader( g_vs_shared, nullptr, 0 );
+			g_context->PSSetShader( g_ps_render_glyph, nullptr, 0 );
+		} else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE ) {
+			dx11_set_render_target( g_glyph_buffer.rtv, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT, g_glyph_dsv );
+			g_context->OMSetBlendState( g_blend_no_colour, blend_factor, 0xFFFFFFFFu );
+			g_context->OMSetDepthStencilState( g_ds_glyph_resolve, 0 );
 			g_context->IASetInputLayout( g_input_layout_shared );
 			g_context->VSSetShader( g_vs_shared, nullptr, 0 );
 			g_context->PSSetShader( g_ps_render_glyph, nullptr, 0 );
 } else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS ) {
 dx11_set_render_target( g_atlas.rtv, VE_FONTCACHE_ATLAS_WIDTH, VE_FONTCACHE_ATLAS_HEIGHT );
 g_context->OMSetBlendState( g_blend_alpha, blend_factor, 0xFFFFFFFFu );
+g_context->OMSetDepthStencilState( g_ds_disabled, 0 );
 g_context->IASetInputLayout( g_input_layout_blit_atlas );
 g_context->VSSetShader( g_vs_blit_atlas, nullptr, 0 );
 g_context->PSSetShader( g_ps_blit_atlas, nullptr, 0 );
@@ -984,6 +1044,7 @@ g_context->PSSetShaderResources( 0, 1, &g_glyph_buffer.srv );
 } else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET || dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_UNCACHED || dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_CPU_CACHED ) {
 dx11_set_render_target( dx11_current_backbuffer_rtv(), window_size.width, window_size.height );
 g_context->OMSetBlendState( g_blend_alpha, blend_factor, 0xFFFFFFFFu );
+g_context->OMSetDepthStencilState( g_ds_disabled, 0 );
 g_context->IASetInputLayout( g_input_layout_draw_text );
 g_context->VSSetShader( g_vs_draw_text, nullptr, 0 );
 g_context->PSSetShader( g_ps_draw_text, nullptr, 0 );
@@ -1045,12 +1106,15 @@ continue;
 			ID3D11RenderTargetView* current_rtv = nullptr;
 			if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH ) {
 				current_rtv = g_glyph_buffer.rtv;
+				dx11_clear_render_target( current_rtv );
+				g_context->ClearDepthStencilView( g_glyph_dsv, D3D11_CLEAR_STENCIL, 1.0f, 0 );
 } else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS ) {
 current_rtv = g_atlas.rtv;
+dx11_clear_render_target( current_rtv );
 } else {
 current_rtv = dx11_current_backbuffer_rtv();
-}
 dx11_clear_render_target( current_rtv );
+}
 }
 
 		if ( draw_count == 0 ) {

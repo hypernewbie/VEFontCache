@@ -17,11 +17,11 @@ It aims to:
 
 # How it works
 
-Glyphs are GPU rasterised with 16x supersampling. This method is a simplification of "Easy Scalable Text Rendering on the GPU",
-by Evan Wallace, making use of XOR blending. Bézier curves are handled via brute force triangle tessellation; even 6 triangles per
+Glyphs are GPU rasterised with 16x supersampling using stencil-based non-zero winding fill, the correct fill rule for
+TrueType/OpenType fonts. Bézier curves are handled via brute force triangle tessellation; even 6 triangles per
 curve only generates < 300 triangles, which is nothing for modern GPUs! This avoids complex frag shader for reasonable quality.
 
-![Wireframe with GPU XOR blending](images/wireframe.png)
+![Wireframe with GPU stencil non-zero winding fill](images/wireframe.png)
 
 Texture atlas caching uses naïve grid placement; this wastes a lot of space but ensures interchangeable cache slots allowing for
 straight up LRU ( Least Recently Used ) caching scheme to be employed.
@@ -60,7 +60,7 @@ Glyphs are first rendered to an intermediate 2k x 512px R8 texture. This allows 
 intermediate texture to the final atlas location.
 
 The atlas texture looks something like this:
-![Wireframe with GPU XOR blending](images/atlas_small.png)
+![Wireframe with GPU stencil non-zero winding fill](images/atlas_small.png)
 
 # Usage
 

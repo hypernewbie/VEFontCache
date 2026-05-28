@@ -430,7 +430,8 @@ inline bool ve_fontcache_backend_test_is_known_pass( uint32_t pass )
 		|| pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_UNCACHED
 		|| pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_PAGE_TEXTURE_CREATE
 		|| pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_UPLOAD
-		|| pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_CPU_CACHED;
+		|| pass == VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_CPU_CACHED
+		|| pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE;
 }
 
 inline bool ve_fontcache_backend_test_is_atlas_update_pass( uint32_t pass )
@@ -438,7 +439,8 @@ inline bool ve_fontcache_backend_test_is_atlas_update_pass( uint32_t pass )
 	return pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH
 		|| pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS
 		|| pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_PAGE_TEXTURE_CREATE
-		|| pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_UPLOAD;
+		|| pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_UPLOAD
+		|| pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE;
 }
 
 inline int ve_fontcache_backend_test_count_pass( const ve_fontcache_drawlist& drawlist, uint32_t pass )
@@ -2130,6 +2132,7 @@ inline void ve_fontcache_backend_test_surface_size_for_pass( const ve_fontcache*
 {
 	switch ( pass ) {
 		case VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH:
+		case VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE:
 			width_out = static_cast< float >( VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH );
 			height_out = static_cast< float >( VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT );
 			break;
@@ -2183,7 +2186,7 @@ inline void ve_fontcache_backend_test_transform_dest_rect(
 	float width = 0.0f;
 	float height = 0.0f;
 	ve_fontcache_backend_test_surface_size_for_pass( cache, pass, width, height );
-	if ( pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH || pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS ) {
+	if ( pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH || pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE || pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS ) {
 		ve_fontcache_screenspace_xform( rect_x, rect_y, rect_w, rect_h, width, height );
 	} else {
 		ve_fontcache_texspace_xform( rect_x, rect_y, rect_w, rect_h, width, height );
@@ -2255,7 +2258,7 @@ inline void ve_fontcache_backend_test_append_quad(
 	float v0 = 0.0f;
 	float u1 = 0.0f;
 	float v1 = 0.0f;
-	if ( pass != VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH ) {
+	if ( pass != VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH && pass != VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE ) {
 		ve_fontcache_backend_test_transform_source_rect( pass, source_rect, u0, v0, u1, v1 );
 	}
 
@@ -2306,6 +2309,13 @@ inline void ve_fontcache_backend_test_append_square(
 	const std::array< float, 4 >& colour = { 1.0f, 1.0f, 1.0f, 1.0f } )
 {
 	ve_fontcache_backend_test_append_quad( cache, pass, { x, y, size, size }, source_rect, 0, colour );
+}
+
+inline void ve_fontcache_backend_test_append_glyph_resolve(
+	ve_fontcache* cache,
+	const ve_fontcache_backend_test_rect& rect )
+{
+	ve_fontcache_backend_test_append_quad( cache, VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE, rect );
 }
 
 inline void ve_fontcache_backend_test_append_hollow_square(
@@ -3485,6 +3495,7 @@ inline void ve_fontcache_backend_test_run_surface_contract(
 
 	ve_fontcache_backend_test_reset_state( options );
 	ve_fontcache_backend_test_append_square( options.cache, VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH, 96, 80, 64 );
+	ve_fontcache_backend_test_append_glyph_resolve( options.cache, { 96, 80, 64, 64 } );
 	ve_fontcache_backend_test_execute_pipeline( options );
 	ve_fontcache_backend_test_surface_snapshot glyph_only_snapshot;
 	bool glyph_only_ok = ve_fontcache_backend_test_capture_surface_snapshot( options, glyph_only_snapshot );
@@ -3647,6 +3658,7 @@ inline void ve_fontcache_backend_test_run_glyph_geometry(
 
 	ve_fontcache_backend_test_reset_state( options );
 	ve_fontcache_backend_test_append_square( options.cache, VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH, glyph_square.x, glyph_square.y, glyph_square.w );
+	ve_fontcache_backend_test_append_glyph_resolve( options.cache, glyph_square );
 	ve_fontcache_backend_test_execute_pipeline( options );
 	std::vector< uint8_t > glyph_square_pixels;
 	bool square_ok = ve_fontcache_backend_test_readback_texture(
@@ -3720,6 +3732,7 @@ inline void ve_fontcache_backend_test_run_glyph_geometry(
 
 	ve_fontcache_backend_test_reset_state( options );
 	ve_fontcache_backend_test_append_diagonal_seam_square( options.cache, glyph_square.x, glyph_square.y, glyph_square.w );
+	ve_fontcache_backend_test_append_glyph_resolve( options.cache, glyph_square );
 	ve_fontcache_backend_test_execute_pipeline( options );
 	std::vector< uint8_t > seam_pixels;
 	bool seam_ok = ve_fontcache_backend_test_readback_texture(
@@ -3778,6 +3791,7 @@ inline void ve_fontcache_backend_test_run_glyph_geometry(
 		l_shape_rect.w,
 		l_shape_rect.h,
 		l_shape_thickness );
+	ve_fontcache_backend_test_append_glyph_resolve( options.cache, l_shape_rect );
 	ve_fontcache_backend_test_execute_pipeline( options );
 	std::vector< uint8_t > l_shape_pixels;
 	bool l_shape_ok = ve_fontcache_backend_test_readback_texture(
@@ -3861,6 +3875,7 @@ inline void ve_fontcache_backend_test_run_glyph_geometry(
 	for ( const glyph_clip_case& clip_case : clip_cases ) {
 		ve_fontcache_backend_test_reset_state( options );
 		ve_fontcache_backend_test_append_quad( options.cache, VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH, clip_case.draw_rect );
+		ve_fontcache_backend_test_append_glyph_resolve( options.cache, { 0, 0, static_cast< int >( VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH ), static_cast< int >( VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT ) } );
 		ve_fontcache_backend_test_execute_pipeline( options );
 		std::vector< uint8_t > clipped_pixels;
 		bool clip_ok = ve_fontcache_backend_test_readback_surface_full( options, "glyph_buffer", clipped_pixels );
@@ -3894,14 +3909,14 @@ inline void ve_fontcache_backend_test_run_glyph_geometry(
 	}
 }
 
-inline void ve_fontcache_backend_test_run_glyph_blend_xor(
+inline void ve_fontcache_backend_test_run_glyph_winding_stencil(
 	ve_fontcache_backend_test_result& result,
 	const ve_fontcache_backend_test_options& options )
 {
 	if ( !ve_fontcache_backend_test_require_suite(
 		result,
 		options,
-		"glyph_blend_xor",
+		"glyph_winding_stencil",
 		VE_FONTCACHE_BACKEND_TEST_REQUIRES_GPU | VE_FONTCACHE_BACKEND_TEST_REQUIRES_RESET ) ) {
 		return;
 	}
@@ -3913,35 +3928,48 @@ inline void ve_fontcache_backend_test_run_glyph_blend_xor(
 	ve_fontcache_backend_test_reset_state( options );
 	ve_fontcache_backend_test_append_square( options.cache, VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH, rect_a.x, rect_a.y, rect_a.w );
 	ve_fontcache_backend_test_append_square( options.cache, VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH, rect_a.x, rect_a.y, rect_a.w );
+	ve_fontcache_backend_test_append_glyph_resolve( options.cache, rect_a );
 	ve_fontcache_backend_test_execute_pipeline( options );
-	std::vector< uint8_t > cancel_pixels;
-	bool cancel_ok = ve_fontcache_backend_test_readback_texture(
+	std::vector< uint8_t > double_pixels;
+	bool double_ok = ve_fontcache_backend_test_readback_texture(
 		options,
 		"glyph_buffer",
 		read_rect.x,
 		read_rect.y,
 		read_rect.w,
 		read_rect.h,
-		cancel_pixels );
-	const ve_fontcache_backend_test_bbox cancel_bbox = ve_fontcache_backend_test_translate_bbox(
-		ve_fontcache_backend_test_thresholded_bbox( cancel_pixels, read_rect.w, read_rect.h ),
-		read_rect.x,
-		read_rect.y );
+		double_pixels );
+	std::vector< uint8_t > expected_double = ve_fontcache_backend_test_make_image( read_rect.w, read_rect.h, 0 );
+	for ( int y = 0; y < read_rect.h; y++ ) {
+		for ( int x = 0; x < read_rect.w; x++ ) {
+			const bool in_a = x >= rect_a.x - read_rect.x && x < rect_a.x - read_rect.x + rect_a.w
+				&& y >= rect_a.y - read_rect.y && y < rect_a.y - read_rect.y + rect_a.h;
+			expected_double[ static_cast< size_t >( y ) * read_rect.w + x ] = in_a ? 255 : 0;
+		}
+	}
+	const ve_fontcache_backend_test_diff_stats double_diff = ve_fontcache_backend_test_expected_vs_actual_diff(
+		expected_double,
+		double_pixels,
+		read_rect.w,
+		read_rect.h );
+	const bool double_pass = double_ok && double_diff.mean_abs_error <= 6.0;
 	ve_fontcache_backend_test_expect(
 		result,
-		cancel_ok && !ve_fontcache_backend_test_any_non_zero( cancel_pixels ),
+		double_pass,
 		ve_fontcache_backend_test_make_failure(
-			"glyph_blend_xor.double_cancel",
-			{},
-			cancel_bbox,
+			"glyph_winding_stencil.double_same_direction",
+			ve_fontcache_backend_test_translate_bbox(
+				ve_fontcache_backend_test_thresholded_bbox( expected_double, read_rect.w, read_rect.h ),
+				read_rect.x,
+				read_rect.y ),
+			ve_fontcache_backend_test_translate_bbox(
+				ve_fontcache_backend_test_thresholded_bbox( double_pixels, read_rect.w, read_rect.h ),
+				read_rect.x,
+				read_rect.y ),
 			nullptr,
 			nullptr,
-			"diff=" + ve_fontcache_backend_test_format_diff( ve_fontcache_backend_test_expected_vs_actual_diff(
-				ve_fontcache_backend_test_make_image( read_rect.w, read_rect.h, 0 ),
-				cancel_pixels,
-				read_rect.w,
-				read_rect.h ) ),
-			"wrong blend mode on glyph pass" ) );
+			"diff=" + ve_fontcache_backend_test_format_diff( double_diff ),
+			"expected filled square for same-direction double coverage" ) );
 
 	ve_fontcache_backend_test_reset_state( options );
 	ve_fontcache_backend_test_append_overlapping_quads(
@@ -3949,52 +3977,54 @@ inline void ve_fontcache_backend_test_run_glyph_blend_xor(
 		VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH,
 		rect_a,
 		rect_b );
+	ve_fontcache_backend_test_append_glyph_resolve( options.cache, { 80, 80, 96, 64 } );
 	ve_fontcache_backend_test_execute_pipeline( options );
-	std::vector< uint8_t > ring_pixels;
-	bool ring_ok = ve_fontcache_backend_test_readback_texture(
+	std::vector< uint8_t > union_pixels;
+	bool union_ok = ve_fontcache_backend_test_readback_texture(
 		options,
 		"glyph_buffer",
 		read_rect.x,
 		read_rect.y,
 		read_rect.w,
 		read_rect.h,
-		ring_pixels );
-	std::vector< uint8_t > expected_ring = ve_fontcache_backend_test_make_image( read_rect.w, read_rect.h, 0 );
+		union_pixels );
+	std::vector< uint8_t > expected_union = ve_fontcache_backend_test_make_image( read_rect.w, read_rect.h, 0 );
 	for ( int y = 0; y < read_rect.h; y++ ) {
 		for ( int x = 0; x < read_rect.w; x++ ) {
 			const bool in_a = x >= rect_a.x - read_rect.x && x < rect_a.x - read_rect.x + rect_a.w
 				&& y >= rect_a.y - read_rect.y && y < rect_a.y - read_rect.y + rect_a.h;
 			const bool in_b = x >= rect_b.x - read_rect.x && x < rect_b.x - read_rect.x + rect_b.w
 				&& y >= rect_b.y - read_rect.y && y < rect_b.y - read_rect.y + rect_b.h;
-			expected_ring[ static_cast< size_t >( y ) * read_rect.w + x ] = ( in_a ^ in_b ) ? 255 : 0;
+			expected_union[ static_cast< size_t >( y ) * read_rect.w + x ] = ( in_a || in_b ) ? 255 : 0;
 		}
 	}
-	const ve_fontcache_backend_test_diff_stats ring_diff = ve_fontcache_backend_test_expected_vs_actual_diff(
-		expected_ring,
-		ring_pixels,
+	const ve_fontcache_backend_test_diff_stats union_diff = ve_fontcache_backend_test_expected_vs_actual_diff(
+		expected_union,
+		union_pixels,
 		read_rect.w,
 		read_rect.h );
-	const bool ring_pass = ring_ok && ring_diff.mean_abs_error <= 6.0;
+	const bool union_pass = union_ok && union_diff.mean_abs_error <= 6.0;
 	ve_fontcache_backend_test_expect(
 		result,
-		ring_pass,
+		union_pass,
 		ve_fontcache_backend_test_make_failure(
-			"glyph_blend_xor.overlap_ring",
+			"glyph_winding_stencil.overlap_union",
 			ve_fontcache_backend_test_translate_bbox(
-				ve_fontcache_backend_test_thresholded_bbox( expected_ring, read_rect.w, read_rect.h ),
+				ve_fontcache_backend_test_thresholded_bbox( expected_union, read_rect.w, read_rect.h ),
 				read_rect.x,
 				read_rect.y ),
 			ve_fontcache_backend_test_translate_bbox(
-				ve_fontcache_backend_test_thresholded_bbox( ring_pixels, read_rect.w, read_rect.h ),
+				ve_fontcache_backend_test_thresholded_bbox( union_pixels, read_rect.w, read_rect.h ),
 				read_rect.x,
 				read_rect.y ),
 			nullptr,
 			nullptr,
-			"diff=" + ve_fontcache_backend_test_format_diff( ring_diff ),
-			"wrong blend mode on glyph pass" ) );
+			"diff=" + ve_fontcache_backend_test_format_diff( union_diff ),
+			"expected union for overlapping same-direction quads" ) );
 
 	ve_fontcache_backend_test_reset_state( options );
 	ve_fontcache_backend_test_append_overlapping_quads( options.cache, VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH, rect_a, rect_b );
+	ve_fontcache_backend_test_append_glyph_resolve( options.cache, { 80, 80, 96, 64 } );
 	ve_fontcache_backend_test_execute_pipeline( options );
 	std::vector< uint8_t > order_ab;
 	bool order_ok = ve_fontcache_backend_test_readback_texture(
@@ -4007,6 +4037,7 @@ inline void ve_fontcache_backend_test_run_glyph_blend_xor(
 		order_ab );
 	ve_fontcache_backend_test_reset_state( options );
 	ve_fontcache_backend_test_append_overlapping_quads( options.cache, VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH, rect_b, rect_a );
+	ve_fontcache_backend_test_append_glyph_resolve( options.cache, { 80, 80, 96, 64 } );
 	ve_fontcache_backend_test_execute_pipeline( options );
 	std::vector< uint8_t > order_ba;
 	order_ok = order_ok && ve_fontcache_backend_test_readback_texture(
@@ -4020,13 +4051,13 @@ inline void ve_fontcache_backend_test_run_glyph_blend_xor(
 	ve_fontcache_backend_test_expect(
 		result,
 		order_ok && order_ab == order_ba,
-		"glyph_blend_xor.order_invariant: expected identical output for AB and BA overlap order, observed diff="
+		"glyph_winding_stencil.order_invariant: expected identical output for AB and BA overlap order, observed diff="
 			+ ve_fontcache_backend_test_format_diff( ve_fontcache_backend_test_expected_vs_actual_diff(
 				order_ab,
 				order_ba,
 				read_rect.w,
 				read_rect.h ) )
-			+ "; probable cause: order-sensitive state leakage in glyph XOR path" );
+			+ "; probable cause: order-sensitive state leakage in glyph stencil path" );
 }
 
 inline void ve_fontcache_backend_test_run_atlas_blit_geometry(
@@ -5211,6 +5242,7 @@ inline void ve_fontcache_backend_test_run_cross_pass_sequences(
 	const ve_fontcache_backend_test_rect atlas_read = { 504, 376, 64, 64 };
 	const ve_fontcache_backend_test_rect target_read = { 512, 312, 64, 64 };
 	ve_fontcache_backend_test_append_l_shape( options.cache, glyph_source.x, glyph_source.y, glyph_source.w, glyph_source.h, 64 );
+	ve_fontcache_backend_test_append_glyph_resolve( options.cache, glyph_source );
 	ve_fontcache_backend_test_execute_pipeline( options );
 	std::vector< uint8_t > glyph_pixels;
 	bool pipeline_ok = ve_fontcache_backend_test_readback_texture(
@@ -6550,7 +6582,7 @@ inline void ve_fontcache_backend_test_run_stage_local_suites(
 	const ve_fontcache_backend_test_options& options )
 {
 	ve_fontcache_backend_test_run_glyph_geometry( result, options );
-	ve_fontcache_backend_test_run_glyph_blend_xor( result, options );
+	ve_fontcache_backend_test_run_glyph_winding_stencil( result, options );
 	ve_fontcache_backend_test_run_atlas_blit_geometry( result, options );
 	ve_fontcache_backend_test_run_target_sampling_atlas( result, options );
 	ve_fontcache_backend_test_run_target_sampling_flip_detector( result, options );

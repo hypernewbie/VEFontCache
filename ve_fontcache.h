@@ -119,6 +119,18 @@
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 	glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fontcache_fbo_texture[ 0 ], 0 );
 
+	// Stencil renderbuffer required for non-zero winding fill.
+	GLuint fontcache_stencil_rb;
+	glGenRenderbuffers( 1, &fontcache_stencil_rb );
+	glBindRenderbuffer( GL_RENDERBUFFER, fontcache_stencil_rb );
+	glRenderbufferStorage( GL_RENDERBUFFER, GL_STENCIL_INDEX8, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT );
+	glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, fontcache_stencil_rb );
+
+	// Initial clear.
+	glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
+	glClearStencil( 0 );
+	glClear( GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
+
 	// Second render target is 4k x 2k single-channel 8-byte red.
 	glBindFramebuffer( GL_FRAMEBUFFER, fontcache_fbo[ 1 ] );
 	glBindTexture( GL_TEXTURE_2D, fontcache_fbo_texture[ 1 ] );
@@ -132,20 +144,40 @@
 3. Implement drawlist execute method ( OpenGL example ):
 	
 	glDisable( GL_CULL_FACE );
-	glEnable( GL_BLEND );
-	glBlendEquation( GL_FUNC_ADD );
+	glEnable( GL_STENCIL_TEST );
 	
 	for ( auto& dcall : drawlist->dcalls ) {
-				if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH ) {
+		if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH ) {
 			glUseProgram( fontcache_shader_render_glyph );
 			glBindFramebuffer( GL_FRAMEBUFFER, fontcache_fbo[ 0 ] );
-			glBlendFunc( GL_ONE_MINUS_DST_COLOR, GL_ONE_MINUS_SRC_COLOR );
+			glDisable( GL_DEPTH_TEST );
+			glDisable( GL_BLEND );
+			glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+			glStencilMask( 0xFF );
+			glStencilFunc( GL_ALWAYS, 0, 0xFF );
+			glStencilOpSeparate( GL_FRONT, GL_KEEP, GL_KEEP, GL_INCR_WRAP );
+			glStencilOpSeparate( GL_BACK,  GL_KEEP, GL_KEEP, GL_DECR_WRAP );
+			glViewport( 0, 0, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT );
+			glScissor( 0, 0, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT );
+			glDisable( GL_FRAMEBUFFER_SRGB );
+		} else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE ) {
+			glUseProgram( fontcache_shader_render_glyph );
+			glBindFramebuffer( GL_FRAMEBUFFER, fontcache_fbo[ 0 ] );
+			glDisable( GL_DEPTH_TEST );
+			glDisable( GL_BLEND );
+			glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+			glStencilMask( 0xFF );
+			glStencilFunc( GL_NOTEQUAL, 0, 0xFF );
+			glStencilOp( GL_KEEP, GL_KEEP, GL_ZERO );
 			glViewport( 0, 0, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT );
 			glScissor( 0, 0, VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH, VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT );
 			glDisable( GL_FRAMEBUFFER_SRGB );
 		} else if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS ) {
 			glUseProgram( fontcache_shader_blit_atlas );
 			glBindFramebuffer( GL_FRAMEBUFFER, fontcache_fbo[ 1 ] );
+			glDisable( GL_STENCIL_TEST );
+			glEnable( GL_BLEND );
+			glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 			glViewport( 0, 0, VE_FONTCACHE_ATLAS_WIDTH, VE_FONTCACHE_ATLAS_HEIGHT );
 			glScissor( 0, 0, VE_FONTCACHE_ATLAS_WIDTH, VE_FONTCACHE_ATLAS_HEIGHT );
@@ -157,6 +189,9 @@
 		} else {
 			glUseProgram( fontcache_shader_draw_text );
 			glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+			glDisable( GL_STENCIL_TEST );
+			glEnable( GL_BLEND );
+			glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 			glViewport( 0, 0, window_size.width, window_size.height );
 			glScissor( 0, 0, window_size.width, window_size.height );
@@ -169,7 +204,15 @@
 		}
 		if ( dcall.clear_before_draw ) {
 			glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
-			glClear( GL_COLOR_BUFFER_BIT );
+			if ( dcall.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH ) {
+				glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+				glStencilMask( 0xFF );
+				glClearStencil( 0 );
+				glClear( GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
+				glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+			} else {
+				glClear( GL_COLOR_BUFFER_BIT );
+			}
 		}
 		if ( dcall.end_index - dcall.start_index == 0 )
 			continue;
@@ -300,6 +343,7 @@ static_assert( VE_FONTCACHE_ATLAS_REGION_D_CAPACITY == 256, "VE FontCache Atlas 
 #define VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_PAGE_TEXTURE_CREATE 5
 #define VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_UPLOAD 6
 #define VE_FONTCACHE_FRAMEBUFFER_PASS_TARGET_CPU_CACHED 7
+#define VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE 8
 
 // How many to store in text shaping cache. Shaping cache is also stored in LRU format.
 #define VE_FONTCACHE_SHAPECACHE_SIZE 256
@@ -1107,6 +1151,25 @@ bool ve_fontcache_cache_glyph(
 	draw.end_index = (uint32_t) cache->drawlist.indices.size();
 	if ( draw.end_index > draw.start_index ) {
 		cache->drawlist.dcalls.push_back( draw );
+
+		// Emit a GLYPH_RESOLVE cover quad over the glyph bounds.
+		// This writes white to the color buffer where stencil != 0, then zeroes stencil.
+		ve_fontcache_draw resolve;
+		resolve.pass = VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE;
+		resolve.start_index = (uint32_t) cache->drawlist.indices.size();
+
+		// Compute transformed glyph bounds with 1-pixel padding in glyph FBO space.
+		float px = 2.0f / VE_FONTCACHE_GLYPHDRAW_BUFFER_WIDTH;
+		float py = 2.0f / VE_FONTCACHE_GLYPHDRAW_BUFFER_HEIGHT;
+		float x0 = bounds_x0 * scaleX + translateX - px;
+		float y0 = bounds_y0 * scaleY + translateY - py;
+		float x1 = bounds_x1 * scaleX + translateX + px;
+		float y1 = bounds_y1 * scaleY + translateY + py;
+
+		ve_fontcache_blit_quad( cache->drawlist, x0, y0, x1, y1, 0.0f, 0.0f, 1.0f, 1.0f );
+
+		resolve.end_index = (uint32_t) cache->drawlist.indices.size();
+		cache->drawlist.dcalls.push_back( resolve );
 	}
 
 	stbtt_FreeShape( &entry.info, shape );
@@ -2048,8 +2111,9 @@ void ve_fontcache_optimise_drawlist( ve_fontcache* cache )
 		if ( draw1.clear_before_draw ) merge = false;
 		if ( draw0.colour[0] != draw1.colour[0] || draw0.colour[1] != draw1.colour[1] ||
 			draw0.colour[2] != draw1.colour[2] || draw0.colour[3] != draw1.colour[3] ) merge = false;
-        if ( draw0.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_PAGE_TEXTURE_CREATE || draw1.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_PAGE_TEXTURE_CREATE ) merge = false;
+		if ( draw0.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_PAGE_TEXTURE_CREATE || draw1.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_PAGE_TEXTURE_CREATE ) merge = false;
         if ( draw0.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_UPLOAD || draw1.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_ATLAS_UPLOAD ) merge = false;
+        if ( draw0.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE || draw1.pass == VE_FONTCACHE_FRAMEBUFFER_PASS_GLYPH_RESOLVE ) merge = false;
     #ifdef VE_FONTCACHE_FREETYPE_RASTERISATION
         if ( draw0.atlas_page != draw1.atlas_page ) merge = false;
     #endif // VE_FONTCACHE_FREETYPE_RASTERISATION
