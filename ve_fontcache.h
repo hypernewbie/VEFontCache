@@ -725,6 +725,17 @@ static bool ve_fontcache_LRU_key_matches_font( uint64_t key, ve_font_id font )
 	return ( key >> 32 ) == static_cast< uint32_t >( font );
 }
 
+static uint64_t ve_fontcache_glyph_cache_key( const ve_fontcache_entry& entry, ve_glyph glyph_index )
+{
+	uint32_t hash = 2166136261U;
+	const uint8_t* bytes = (const uint8_t*) &glyph_index;
+	for ( int i = 0; i < sizeof( glyph_index ); i++ ) hash = ( hash ^ bytes[i] ) * 16777619U;
+	bytes = (const uint8_t*) &entry.size;
+	for ( int i = 0; i < sizeof( entry.size ); i++ ) hash = ( hash ^ bytes[i] ) * 16777619U;
+	// FNV-1a in the low bits; keep the font id in the high 32 bits for per-font unload.
+	return ( ( 0x100000000ULL * entry.font_id ) & 0xFFFFFFFF00000000ULL ) | hash;
+}
+
 static uint32_t ve_fontcache_LRU_find_next_slot( const ve_fontcache_LRU& LRU )
 {
 	if ( LRU.cache.size() >= static_cast< size_t >( LRU.capacity ) ) {
@@ -1309,7 +1320,7 @@ ve_fontcache_atlas_CPU_bitmap* ve_fontcache_find_CPU_bitmap_atlas_page( ve_fontc
 {
     // Is this codepoint already cached in an existing atlas page?
     ve_fontcache_atlas_CPU_bitmap* page = nullptr;
-    uint64_t cache_code = glyph_index +  ( ( 0x100000000ULL * entry.font_id ) & 0xFFFFFFFF00000000ULL );
+    uint64_t cache_code = ve_fontcache_glyph_cache_key( entry, glyph_index );
     for ( auto& page_itr : cache->atlasCPU.pages ) {
         if ( !page_itr.get() ) continue;
         if ( page_itr->cache.find( cache_code ) != page_itr->cache.end() ) {
@@ -1403,7 +1414,7 @@ void ve_fontcache_CPU_bitmap_atlas_insert( ve_fontcache* cache, ve_fontcache_ent
     STBTT_assert( page );
 
     // Add atlas cache entry.
-    uint64_t cache_code = glyph_index +  ( ( 0x100000000ULL * entry.font_id ) & 0xFFFFFFFF00000000ULL );
+    uint64_t cache_code = ve_fontcache_glyph_cache_key( entry, glyph_index );
     auto& cache_entry = page->cache[cache_code];
     cache_entry.x = rect.x; cache_entry.y = rect.y;
     cache_entry.w = rect.w; cache_entry.h = rect.h;
@@ -1485,7 +1496,7 @@ void ve_fontcache_cache_glyph_to_atlas( ve_fontcache* cache, ve_font_id font, ve
 	if ( region == '\0' || region == 'E' ) return;
 
 	// Grab an atlas LRU cache slot.
-	uint64_t lru_code = glyph_index +  ( ( 0x100000000ULL * font ) & 0xFFFFFFFF00000000ULL );
+	uint64_t lru_code = ve_fontcache_glyph_cache_key( entry, glyph_index );
 	int atlas_index = ve_fontcache_LRU_get( *state, lru_code );
 	if ( atlas_index == -1 ) {
 		if ( (int) *next_idx < state->capacity ) {
@@ -1843,7 +1854,7 @@ bool ve_fontcache_draw_cached_glyph_ff( ve_fontcache* cache, ve_fontcache_entry&
         return false;
     }
 
-    uint64_t cache_code = glyph_index + ( ( 0x100000000ULL * entry.font_id ) & 0xFFFFFFFF00000000ULL );
+    uint64_t cache_code = ve_fontcache_glyph_cache_key( entry, glyph_index );
     STBTT_assert( page->cache.find( cache_code ) != page->cache.end() );
     auto& cache_entry = page->cache[cache_code];
 
@@ -1913,7 +1924,7 @@ bool ve_fontcache_draw_cached_glyph( ve_fontcache* cache, ve_fontcache_entry& en
 	}
 
 	// Is this codepoint cached?
-	uint64_t lru_code = glyph_index +  ( ( 0x100000000ULL * entry.font_id ) & 0xFFFFFFFF00000000ULL );
+	uint64_t lru_code = ve_fontcache_glyph_cache_key( entry, glyph_index );
 	int atlas_index = ve_fontcache_LRU_get( *state, lru_code );
 	if( atlas_index == -1 ) {
 		return false;
@@ -1976,7 +1987,7 @@ static bool ve_fontcache_can_batch_glyph( ve_fontcache* cache, ve_font_id font, 
 	if ( cache->temp_codepoint_seen.size() > 1024 ) return false;
 
 	// Is this glyph cached?
-	uint64_t lru_code = glyph_index +  ( ( 0x100000000ULL * entry.font_id ) & 0xFFFFFFFF00000000ULL );
+	uint64_t lru_code = ve_fontcache_glyph_cache_key( entry, glyph_index );
 	int atlas_index = ve_fontcache_LRU_get( *state, lru_code );
 	if ( atlas_index == -1 ) {
 		if ( *next_idx >= ( uint32_t ) state->capacity ) {
@@ -2052,7 +2063,7 @@ bool ve_fontcache_draw_text( ve_fontcache* cache, ve_font_id font, const std::u8
 		ve_fontcache_reset_batch_codepoint_state( cache );
 		
 		ve_fontcache_cache_glyph_to_atlas( cache, font, glyph_index );
-		uint64_t lru_code = glyph_index + ( ( 0x100000000ULL * font ) & 0xFFFFFFFF00000000ULL );
+		uint64_t lru_code = ve_fontcache_glyph_cache_key( entry, glyph_index );
 		cache->temp_codepoint_seen[ lru_code ] = true;
 
 		batch_start_idx = i;

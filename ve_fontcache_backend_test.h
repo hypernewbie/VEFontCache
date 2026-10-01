@@ -595,7 +595,6 @@ inline bool ve_fontcache_backend_test_find_codepoint_for_regions(
 }
 
 inline ve_fontcache_LRU* ve_fontcache_backend_test_state_for_region( ve_fontcache* cache, char region );
-inline uint64_t ve_fontcache_backend_test_cache_key( ve_font_id font, ve_glyph glyph );
 
 inline bool ve_fontcache_backend_test_is_codepoint_cached(
 	ve_fontcache* cache,
@@ -617,7 +616,7 @@ inline bool ve_fontcache_backend_test_is_codepoint_cached(
 		return false;
 	}
 
-	return ve_fontcache_LRU_peek( *state, ve_fontcache_backend_test_cache_key( font, glyph ) ) != -1;
+	return ve_fontcache_LRU_peek( *state, ve_fontcache_glyph_cache_key( cache->entry[ font ], glyph ) ) != -1;
 }
 
 inline bool ve_fontcache_backend_test_find_uncached_codepoint_for_regions(
@@ -742,11 +741,6 @@ inline ve_fontcache_LRU* ve_fontcache_backend_test_state_for_region( ve_fontcach
 	}
 }
 
-inline uint64_t ve_fontcache_backend_test_cache_key( ve_font_id font, ve_glyph glyph )
-{
-	return glyph + ( ( 0x100000000ULL * font ) & 0xFFFFFFFF00000000ULL );
-}
-
 inline bool ve_fontcache_backend_test_predict_atlas_slot(
 	ve_fontcache* cache,
 	ve_font_id font,
@@ -773,7 +767,7 @@ inline bool ve_fontcache_backend_test_predict_atlas_slot(
 		return false;
 	}
 
-	uint64_t key = ve_fontcache_backend_test_cache_key( font, glyph );
+	uint64_t key = ve_fontcache_glyph_cache_key( entry, glyph );
 	atlas_index_out = ve_fontcache_LRU_peek( *state, key );
 	if ( atlas_index_out != -1 ) {
 		return true;
