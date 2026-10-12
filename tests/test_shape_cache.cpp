@@ -297,3 +297,36 @@ UTEST( shape_cache, failed_or_invalid_draw_does_not_poison_cache )
 	ve_fontcache_drawlist* dl = vefc_test::current_drawlist( ctx );
 	 ASSERT_FALSE( dl->dcalls.empty() );
 }
+
+UTEST( shape_cache, negative_size_draw_skips_glyphs_without_aborting )
+{
+	vefc_test::context ctx;
+	ve_font_id font = ctx.load_file( vefc_test::kRoboto, 24.0f );
+	ASSERT_GE( font, 0 );
+
+	ve_fontcache_set_font_size( &ctx.cache, font, -24.0f );
+	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"MENU" ) );
+	vefc_test::flush( ctx );
+	EXPECT_EQ( 1u, ctx.cache.shape_cache.state.cache.size() );
+}
+
+UTEST( shape_cache, valid_draw_after_negative_size_reuses_original_entry )
+{
+	vefc_test::context ctx;
+	ve_font_id font = ctx.load_file( vefc_test::kRoboto, 24.0f );
+	ASSERT_GE( font, 0 );
+
+	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"MENU" ) );
+	vefc_test::flush( ctx );
+	size_t cache_after_24 = ctx.cache.shape_cache.state.cache.size();
+
+	ve_fontcache_set_font_size( &ctx.cache, font, -24.0f );
+	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"MENU" ) );
+	vefc_test::flush( ctx );
+	ASSERT_EQ( cache_after_24 + 1u, ctx.cache.shape_cache.state.cache.size() );
+
+	ve_fontcache_set_font_size( &ctx.cache, font, 24.0f );
+	ASSERT_TRUE( vefc_test::draw_text( ctx, font, u8"MENU" ) );
+	vefc_test::flush( ctx );
+	EXPECT_EQ( cache_after_24 + 1u, ctx.cache.shape_cache.state.cache.size() );
+}
