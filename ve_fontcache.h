@@ -1331,9 +1331,36 @@ ve_fontcache_atlas_CPU_bitmap* ve_fontcache_find_CPU_bitmap_atlas_page( ve_fontc
     return page;
 }
 
-void ve_fontcache_CPU_bitmap_atlas_insert( ve_fontcache* cache, ve_fontcache_entry& entry, ve_glyph glyph_index )
+ve_fontcache_atlas_CPU_bitmap* ve_fontcache_CPU_bitmap_atlas_new_page( ve_fontcache* cache )
 {
     ve_fontcache_atlas_CPU& atlas = cache->atlasCPU;
+    atlas.pages.push_back( std::make_unique< ve_fontcache_atlas_CPU_bitmap >() );
+
+    ve_fontcache_atlas_CPU_bitmap* page = atlas.pages[atlas.pages.size() - 1].get();
+    page->idx = ( int32_t ) ( cache->atlasCPU.pages.size() - 1 );
+    page->packing_tree = ve_fontcache_atlas_CPU_bitmap::spaces_type( { VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE, VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE } );
+#ifdef VE_FONTCACHE_MAINTAIN_CPU_BITMAP_COPY
+    page->px.resize( VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE * VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE );
+#endif // VE_FONTCACHE_MAINTAIN_CPU_BITMAP_COPY
+    return page;
+}
+
+void ve_fontcache_CPU_bitmap_atlas_insert_placeholder( ve_fontcache* cache, ve_fontcache_entry& entry, ve_glyph glyph_index )
+{
+    // FreeType could not realize this glyph at entry.size. Land a zero-area
+    // entry so later lookups hit and the glyph draws nothing instead of aborting.
+    if ( ve_fontcache_find_CPU_bitmap_atlas_page( cache, entry, glyph_index ) ) return;
+    ve_fontcache_atlas_CPU_bitmap* page = nullptr;
+    for ( auto& page_itr : cache->atlasCPU.pages ) {
+        if ( page_itr.get() ) { page = page_itr.get(); break; }
+    }
+    if ( !page ) page = ve_fontcache_CPU_bitmap_atlas_new_page( cache );
+    auto& cache_entry = page->cache[ve_fontcache_glyph_cache_key( entry, glyph_index )];
+    cache_entry.x = cache_entry.y = cache_entry.w = cache_entry.h = 0;
+}
+
+void ve_fontcache_CPU_bitmap_atlas_insert( ve_fontcache* cache, ve_fontcache_entry& entry, ve_glyph glyph_index )
+{
     ve_fontcache_atlas_CPU_bitmap* page = ve_fontcache_find_CPU_bitmap_atlas_page( cache, entry, glyph_index );
 
     if ( page ) {
@@ -1346,6 +1373,7 @@ void ve_fontcache_CPU_bitmap_atlas_insert( ve_fontcache* cache, ve_fontcache_ent
     #ifdef VE_FONTCACHE_DEBUGPRINT
         printf( "FT_Load_Char failed for glyph 0x%x: %d\n", glyph_index, error );
     #endif // VE_FONTCACHE_DEBUGPRINT
+        ve_fontcache_CPU_bitmap_atlas_insert_placeholder( cache, entry, glyph_index );
         return;
     }
 
@@ -1354,6 +1382,7 @@ void ve_fontcache_CPU_bitmap_atlas_insert( ve_fontcache* cache, ve_fontcache_ent
     #ifdef VE_FONTCACHE_DEBUGPRINT
         printf( "FT_Load_Char failed for glyph 0x%x: %d\n", glyph_index, error );
     #endif // VE_FONTCACHE_DEBUGPRINT
+        ve_fontcache_CPU_bitmap_atlas_insert_placeholder( cache, entry, glyph_index );
         return;
     }
 
@@ -1365,6 +1394,7 @@ void ve_fontcache_CPU_bitmap_atlas_insert( ve_fontcache* cache, ve_fontcache_ent
     #ifdef VE_FONTCACHE_DEBUGPRINT
         printf( "Glyph 0x%x has unsupported pixel mode %d. Only FT_PIXEL_MODE_GRAY is supported.\n", glyph_index, ( int ) bitmap.pixel_mode );
     #endif // VE_FONTCACHE_DEBUGPRINT
+        ve_fontcache_CPU_bitmap_atlas_insert_placeholder( cache, entry, glyph_index );
         return;
     }
 
@@ -1384,14 +1414,7 @@ void ve_fontcache_CPU_bitmap_atlas_insert( ve_fontcache* cache, ve_fontcache_ent
     }
     if ( !page ) {
         // Insert a new CPU atlas page.
-        atlas.pages.push_back( std::make_unique< ve_fontcache_atlas_CPU_bitmap >() );
-
-        page = atlas.pages[atlas.pages.size() - 1].get();
-        page->idx = ( int32_t ) ( cache->atlasCPU.pages.size() - 1 );
-        page->packing_tree = ve_fontcache_atlas_CPU_bitmap::spaces_type( { VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE, VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE } );
-    #ifdef VE_FONTCACHE_MAINTAIN_CPU_BITMAP_COPY
-        page->px.resize( VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE * VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE );
-    #endif // VE_FONTCACHE_MAINTAIN_CPU_BITMAP_COPY
+        page = ve_fontcache_CPU_bitmap_atlas_new_page( cache );
 
         if ( const auto inserted_rectangle = page->packing_tree.insert( rect.get_wh() ) ) {
             rect = *inserted_rectangle;
@@ -1400,6 +1423,7 @@ void ve_fontcache_CPU_bitmap_atlas_insert( ve_fontcache* cache, ve_fontcache_ent
         #ifdef VE_FONTCACHE_DEBUGPRINT
             printf( "Failed to insert glyph 0x%x into a NEW CPU atlas page. Maybe font is masive? Try bumping VE_FONTCACHE_CPU_ATLAS_PAGE_SIZE.\n", glyph_index );
         #endif // VE_FONTCACHE_DEBUGPRINT
+            ve_fontcache_CPU_bitmap_atlas_insert_placeholder( cache, entry, glyph_index );
             return;
         }
 
@@ -1857,6 +1881,7 @@ bool ve_fontcache_draw_cached_glyph_ff( ve_fontcache* cache, ve_fontcache_entry&
     uint64_t cache_code = ve_fontcache_glyph_cache_key( entry, glyph_index );
     STBTT_assert( page->cache.find( cache_code ) != page->cache.end() );
     auto& cache_entry = page->cache[cache_code];
+    if ( cache_entry.w == 0 || cache_entry.h == 0 ) return true;
 
     // Figure out the source bounding box in atlas texture.
     float atlas_x = cache_entry.x, atlas_y = cache_entry.y, atlas_w = cache_entry.w, atlas_h = cache_entry.h;
